@@ -16,7 +16,8 @@ Status labels: **Provided** means supplied but not independently verified; **Cod
 | OS/release/codename | Debian GNU/Linux 13 (`trixie`) | Collected 2026-10-31 21:55 MSK |
 | Kernel and architecture | `Linux 6.12.75+rpt-rpi-v8 aarch64 GNU/Linux`, `arm64` | Collected 2026-10-31 |
 | Production scripts directory (`MAIN_SH_DIR`) | `/usr/local/bin/vpngw` | Provided; used by root crontab |
-| Production commit SHA | `1f5eec1` | Collector snapshot from `/usr/local/bin/vpngw`; confirm full SHA before release |
+| Production repository HEAD | `1f5eec1` | Collector snapshot from `/usr/local/bin/vpngw`; Git HEAD alone does not prove which files are installed |
+| Active bot/functions SHA-256 | Not captured by 23:42 report | Re-run updated collector to compare active files against source |
 | Production config | `/etc/vpn-gw.conf` | Code-confirmed; sourced as Bash by scripts |
 | AdGuard CLI (`ADG_BIN`) | `/opt/adguardvpn_cli/adguardvpn-cli` | Provided; starter also hardcodes this path in recovery |
 | SMTP config path | `/etc/msmtprc` | Provided; script assigns this path after sourcing config |
