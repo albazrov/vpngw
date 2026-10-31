@@ -9,6 +9,20 @@
 
 # Библиотека общих функций для управления VPN
 
+run_adguard_connect() {
+    local location="${1:-}"
+
+    if [ -z "$location" ]; then
+        return 2
+    fi
+
+    if [ -z "${ADG_BIN:-}" ] || ! command -v "$ADG_BIN" >/dev/null 2>&1; then
+        return 127
+    fi
+
+    "$ADG_BIN" connect -l "$location" >/dev/null 2>&1
+}
+
 check_vpn_connectivity() {
     # Функция принимает один аргумент — имя интерфейса
     local interface="$1"

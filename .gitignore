@@ -7,3 +7,6 @@ config.sh
 *.log
 *.txt
 reports/
+
+# Локальные снимки production inventory содержат топологию и состояние системы
+docs/vpngw-production-inventory-update*.md

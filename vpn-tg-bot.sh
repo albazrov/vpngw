@@ -151,8 +151,15 @@ while true; do
                 # Отправляем через вашу очередь
                 send_tg "🔄 *[$SYSTEM_NAME]* Выполняю переключение на локацию *$LOC_ISO*..."
                 
-                # Переключаем AdGuard
-                "ADG_BIN" connect -l "$LOC_ISO" > /dev/null 2>&1
+                if run_adguard_connect "$LOC_ISO"; then
+                    :
+                else
+                    CLI_EXIT=$?
+                    log_msg "ERROR: AdGuard CLI connect failed (exit $CLI_EXIT) for $LOC_ISO"
+                    send_tg "❌ *[$SYSTEM_NAME]* Не удалось запустить подключение к *$LOC_ISO* (код $CLI_EXIT). Маршруты не изменены."
+                    continue
+                fi
+
                 sleep 5
                 
                 # Перестраиваем таблицы маршрутизации
