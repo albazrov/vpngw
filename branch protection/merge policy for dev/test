@@ -1,0 +1,136 @@
+# Branch protection and merge policy for dev/test
+
+## 1. Цель
+
+Этот документ фиксирует правила, которые защищают ветки `dev` и `test` от неконтролируемых изменений и обеспечивают повторяемый цикл разработки:
+
+- разработка ведётся в `dev`
+- проверка идёт через PR `dev -> test`
+- merge в `test` возможен только после валидации и review
+- любые правки после review требуют повторной проверки
+- прямые коммиты в защищённые ветки запрещены
+
+---
+
+## 2. Основные ветки
+
+- `dev`
+  - ветка разработки
+  - в неё попадают изменения после feature/fix PR
+- `test`
+  - ветка проверки и интеграционного контроля
+  - обновляется только через PR из `dev`
+
+Дополнительные ветки:
+- `feature/*`
+- `fix/*`
+- `hotfix/*`
+
+---
+
+## 3. Правила защиты веток
+
+### 3.1. Защита `dev`
+Для ветки `dev` рекомендуется включить:
+
+- Require pull request reviews before merging
+- Require status checks to pass before merging
+- Dismiss stale pull request approvals when new commits are pushed
+- Require branches to be up to date before merging
+- Require conversation resolution before merge
+- Prevent direct pushes to the branch
+- Block force pushes
+
+### 3.2. Защита `test`
+Для ветки `test` обязательно включить:
+
+- Require pull request reviews before merging
+- Require status checks to pass before merging
+- Dismiss stale pull request approvals when new commits are pushed
+- Require conversation resolution before merge
+- Require branches to be up to date before merging
+- Prevent direct pushes to the branch
+- Block force pushes
+- Only allow PRs from `dev` (if this is a strict policy)
+
+---
+
+## 4. Merge policy
+
+### 4.1. Merge в `dev`
+Разрешён только:
+- через PR
+- после успешной валидации
+- после закрытия обязательных комментариев
+- после review от одного или нескольких проверяющих
+
+### 4.2. Merge в `test`
+Разрешён только:
+- через PR `dev -> test`
+- после прохождения всех обязательных checks
+- после повторной валидации после исправления замечаний
+- после закрытия blocking review comments
+- после обновления ветки до актуального состояния
+
+### 4.3. Запрещено
+- прямой push в `dev` и `test`
+- force push в защищённые ветки
+- merge PR без зелёного статуса
+- merge PR, если есть незакрытые blocking замечания
+- merge PR после review без повторного запуска валидации, если были новые коммиты
+
+---
+
+## 5. Review policy
+
+Каждый PR должен проходить:
+- automation validation
+- code review
+- review by agent or maintainer if required
+- validation after fixes
+
+Обязательные требования:
+- все blocking замечания закрыты
+- все workflow jobs green
+- новая версия PR после исправлений должна снова пройти checks
+- reviewer может поставить “changes requested” и неapprove PR до исправления
+
+---
+
+## 6. Процесс исправления замечаний
+
+После появления комментариев в PR:
+1. разработчик читает все замечания;
+2. отделяет blocking от non-blocking;
+3. вносит правки в эту же ветку;
+4. делает новый commit;
+5. обновляет PR;
+6. повторяет validation;
+7. только после этого PR снова рассматривается.
+
+Если после нового коммита замечания остаются — PR не считается готовым.
+
+---
+
+## 7. Definition of Done for merge
+
+PR готов к merge, если:
+- все required checks зелёные;
+- нет незакрытых blocking комментариев;
+- ветка актуальна;
+- review approval есть;
+- все критичные сценарии проверены;
+- после последнего исправления выполнена повторная валидация.
+
+---
+
+## 8. Summary
+
+Ключевой принцип:
+- no direct push
+- no merge without checks
+- no merge without review
+- no merge without fixing comments
+- no merge without revalidation after last commit
+
+Это обеспечивает стабильную разработку и безопасный pipeline dev -> test.
