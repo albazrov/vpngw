@@ -35,7 +35,7 @@
 - Статус: [ ] PR/коммит: ____ Проверки: ____
 - **Промт агенту:** «Исправь вызов AdGuard CLI в `vpn-tg-bot.sh`: используй настроенный исполняемый путь, обработай ошибку команды и добавь тест с fake CLI. Не меняй другие операции; выполни `bash -n`, ShellCheck и тест.»
 - Runbook: [развёртывание, проверка и откат задачи 0.1](runbooks/0.1-adguard-cli.md).
-- Локальный прогресс: код и fake CLI test выполнены; осталось пройти ShellCheck/CI, review и безопасную production smoke-проверку по runbook.
+- Последний production snapshot 2026-10-31 23:42: bot unit active, `tun0` present, IPv4 forwarding=1; оба изменяемых скрипта теперь `root:root 755`, backups найдены. Но source checkout был dirty, fake CLI test не запускался, token всё ещё в argv, reconnect/rollback tests не выполнялись. Не считать задачу закрытой и не повторять deployment до закрытия F-12/F-14.
 
 ### 0.2 Проверять фактически подключённую локацию
 

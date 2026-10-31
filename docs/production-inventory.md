@@ -71,8 +71,8 @@ All `/dev/shm` files are volatile and may disappear on reboot. The collector fou
 | --- | --- | --- | --- |
 | `/etc/vpn-gw.conf` | `root:root` | `600` | Collected 2026-10-31 |
 | `/etc/msmtprc` | `root:root` | `600` | Collected 2026-10-31 |
-| `/usr/local/bin/vpngw/vpn-tg-bot.sh` | `pi:pi` | `755` | Collected 2026-10-31; `pi` can modify code executed by root service |
-| `/usr/local/bin/vpngw/vpn-functions.sh` | `pi:pi` | `755` | Collected 2026-10-31; sourced by root service |
+| `/usr/local/bin/vpngw/vpn-tg-bot.sh` | `root:root` | `755` | Latest collector snapshot 2026-10-31 23:42; earlier snapshot was `pi:pi 755` |
+| `/usr/local/bin/vpngw/vpn-functions.sh` | `root:root` | `755` | Latest collector snapshot 2026-10-31 23:42; earlier snapshot was `pi:pi 755` |
 
 ### Network and routing
 
@@ -154,6 +154,7 @@ Snapshot supplied by the operator on 2026-10-31 (times shown by the host in MSK)
 | Install target | `multi-user.target` | Provided |
 | Enabled | Yes | Starts at boot according to systemd snapshot |
 | State | Active/running | Collector snapshot showed running at 2026-10-31 21:55 MSK |
+| Latest observed service check | Active | Collector snapshot 2026-10-31 23:42 MSK |
 | Main process | `vpn-tg-bot.sh` (`/bin/bash /usr/local/bin/vpngw/vpn-tg-bot.sh`) | PID intentionally not retained from collector |
 | Long-poll child | `curl` calling Telegram `getUpdates` | Collector still found the configured token in argv for one process at 2026-10-31 21:55 MSK; token value omitted |
 | Effective group | Default/empty in unit | Collector showed no explicit `Group` value |
@@ -171,8 +172,10 @@ Avoid `systemctl status <pid>` and `ps ... args` while the current implementatio
 - `vpn-tg-bot.sh` and `vpn-tg-send.sh` read `TG_TOKEN`; bot checks `TG_CHAT_ID`. Actual values are intentionally absent.
 - The supplied systemd unit runs the bot as `root` with `Type=simple`, `Restart=always`, `RestartSec=10`, and `After=network.target`; collector showed no sandboxing restrictions and the full default capability set. Root execution magnifies the impact of bot compromise and should be addressed in the privilege-separation plan.
 - Collector measured `/usr/local/bin/vpngw/vpn-tg-bot.sh` and `vpn-functions.sh` as `pi:pi` mode `755`, while systemd executes the bot as root and sources the functions file. The `pi` owner can modify code later executed with root privileges; production scripts should be root-owned/non-writable by untrusted accounts and deployed through a controlled privileged process.
+- A later collector snapshot (2026-10-31 23:42) reports both files as `root:root 755`, so file ownership was changed after the earlier finding. F-14 remains open until parent-directory modes and all root-cron scripts are checked and the deployment is tied to a clean approved source SHA.
 - Current bot polling passes the Telegram API URL, including its token path, as a `curl` argument. The supplied systemd cgroup output confirmed command-line exposure; rotate the exposed token and fix argv handling before treating the bot credential as protected.
 - Bot startup previously logged a failure because `/dev/shm/vpn_stats` did not exist at startup. At latest collection the directory exists but is `root:root 777`; verify it is created consistently and tighten permissions. Do not use `chmod 777` as the fix.
+- Latest collector health snapshot: bot unit `active`, configured VPN interface `tun0` present, `net.ipv4.ip_forward=1`. This is not a full client-routing/connectivity smoke test.
 - `vpn-email-send.sh` assigns `MSMTP_CONF="/etc/msmtprc"` and `MSMTP_ACC="default"` after sourcing the common config, overriding alternatives configured there. `MSMTP_CONF` is also duplicated in the supplied config.
 - `NET_IF_IP`, `ENABLE_SPEED_TEST`, `MIN_SPEED_KBPS` and `LAST_SEND_TIME` had no tracked consumers in the inspected scripts. Check local/untracked consumers before removing them.
 - `vpn-bypass-update.sh` changes IP forwarding, policy routing, iptables and ipset. Installing/running Docker on this router needs a separate reviewed maintenance plan.
@@ -189,13 +192,16 @@ Do not put secret values in this section.
 - `/etc/msmtprc` owner:mode: `root:root 600`
 - `vpn-tg-bot.service`: root, enabled/active, Restart=always/10s, start limit 5 per 10s; no sandboxing restrictions shown
 - Telegram token rotated after argv exposure; date/reference (no token value): `________________`
-- Bot argv no longer contains Telegram token: latest collection was **YES, one process** at 2026-10-31 21:55 MSK
-- Bot/functions files: `pi:pi 755`; root-executed ownership risk remains open
+- Bot argv no longer contains Telegram token: latest collection was **YES, one process** at 2026-10-31 23:42 MSK
+- Bot/functions files: latest snapshot `root:root 755`; parent directory and all root-executed scripts still need permission audit
 - `/dev/shm/vpn_stats`: `root:root 777`; permission remediation remains open
 - Cron checked against current root crontab on date: `________________`
 - `/mnt/external_data`: `/dev/sda1`, ext4, about 54 GB free in snapshot
 - Docker Engine/Compose: `29.4.3` / `5.1.3`; Gitea container running
 - Current production commit SHA: `1f5eec1` (short SHA)
+- Source checkout at collection: `6cb2721`, **dirty**; fake CLI test was **NOT RUN**
+- Runbook 0.1 backups found: `/usr/local/bin/vpngw/vpn-functions.sh.pre-0.1.20261031T203711Z` and `/usr/local/bin/vpngw/vpn-tg-bot.sh.pre-0.1.20261031T203711Z`; this confirms backup files exist, not that rollback was tested
+- Latest smoke results: bot service active, `tun0` present, IPv4 forwarding `1`; production reconnect and rollback tests not run
 - IPv4/IPv6 route and firewall baseline stored at restricted path: `________________`
 - Inventory verified by / date: `________________`
 
@@ -205,7 +211,7 @@ Run from an authorized local/admin session. Do not print or store config content
 
 ### Automated collector
 
-The repository includes [collect-production-inventory.sh](../tools/collect-production-inventory.sh). It reads an allowlist of non-secret values from `/etc/vpn-gw.conf`, reports selected systemd properties without `ExecStart`/environment, prints process names without arguments, checks whether the configured Telegram token appears in process argv (yes/no and count only), and collects routing/firewall/Docker metadata.
+The repository includes [collect-production-inventory.sh](../tools/collect-production-inventory.sh). It reads an allowlist of non-secret values from `/etc/vpn-gw.conf`, reports selected systemd properties without `ExecStart`/environment, prints process names without arguments, checks whether the configured Telegram token appears in process argv (yes/no and count only), collects routing/firewall/Docker metadata, and creates a `Runbook task 0.1: result fields` section. It reports both Git HEAD and SHA-256 checksums of the active/source bot and functions files; the Git HEAD is not treated as proof of what is deployed. The fake CLI test is run only when the source checkout is clean.
 
 Run only a reviewed copy from a trusted commit on the Pi. The collector sources `/etc/vpn-gw.conf`, so it executes that file as root just like the production scripts. It writes two files, both mode `0600`, and refuses to overwrite either existing output:
 

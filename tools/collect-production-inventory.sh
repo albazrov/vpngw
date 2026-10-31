@@ -4,6 +4,7 @@ set -euo pipefail
 CONFIG_FILE="/etc/vpn-gw.conf"
 BOT_UNIT="vpn-tg-bot.service"
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+COLLECTED_AT=$(date --iso-8601=seconds)
 REPORT_OUTPUT="${1:-/root/vpngw-production-inventory-update-$STAMP.md}"
 DETAILS_OUTPUT="${2:-${REPORT_OUTPUT%.md}-private-details.txt}"
 
@@ -63,6 +64,8 @@ set +u
 source "$CONFIG_FILE"
 set -u
 CONFIGURED_TG_TOKEN="${TG_TOKEN:-}"
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+REPO_DIR=$(dirname -- "$SCRIPT_DIR")
 
 safe_config_vars=(
     SYSTEM_NAME MAIN_SH_DIR ADG_BIN LOG_RAM LOG_DISK STATS_DIR IPSET_CACHE
@@ -211,6 +214,59 @@ if command -v docker >/dev/null 2>&1; then
     DOCKER_COMPOSE_VERSION=$(docker compose version --short 2>/dev/null || printf 'plugin unavailable')
     DOCKER_CONTAINERS=$(docker ps --format '{{.Names}} | {{.Image}} | {{.Status}}' 2>/dev/null || printf 'daemon unavailable')
 fi
+PRODUCTION_REPO_HEAD=$(git -C /usr/local/bin/vpngw rev-parse --short HEAD 2>/dev/null || printf 'not a git checkout / unknown')
+file_sha256() {
+    local path="$1"
+    if [[ -f "$path" ]]; then
+        sha256sum "$path" | awk '{print $1}'
+    else
+        printf 'MISSING'
+    fi
+}
+PRODUCTION_BOT_SHA256=$(file_sha256 /usr/local/bin/vpngw/vpn-tg-bot.sh)
+PRODUCTION_FUNCTIONS_SHA256=$(file_sha256 /usr/local/bin/vpngw/vpn-functions.sh)
+SOURCE_BOT_SHA256=$(file_sha256 "$REPO_DIR/vpn-tg-bot.sh")
+SOURCE_FUNCTIONS_SHA256=$(file_sha256 "$REPO_DIR/vpn-functions.sh")
+PRODUCTION_PAYLOAD_MATCH="NO"
+if [[ "$PRODUCTION_BOT_SHA256" == "$SOURCE_BOT_SHA256" && \
+      "$PRODUCTION_FUNCTIONS_SHA256" == "$SOURCE_FUNCTIONS_SHA256" ]]; then
+    PRODUCTION_PAYLOAD_MATCH="YES"
+fi
+SOURCE_SHA=$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || printf 'not a git checkout / unknown')
+SOURCE_STATE="unknown"
+if git -C "$REPO_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    if [[ -z "$(git -C "$REPO_DIR" status --porcelain)" ]]; then
+        SOURCE_STATE="clean"
+    else
+        SOURCE_STATE="dirty"
+    fi
+fi
+BOT_SERVICE_STATE=$(systemctl is-active "$BOT_UNIT" 2>/dev/null || printf 'unknown')
+VPN_INTERFACE_STATE="not configured"
+if [[ -n "${VPN_IF:-}" ]]; then
+    if ip link show "$VPN_IF" >/dev/null 2>&1; then
+        VPN_INTERFACE_STATE="present ($VPN_IF)"
+    else
+        VPN_INTERFACE_STATE="missing ($VPN_IF)"
+    fi
+fi
+IP_FORWARD_STATE=$(sysctl -n net.ipv4.ip_forward 2>/dev/null || printf 'unknown')
+FUNCTIONS_BACKUP_PATH=$(find /usr/local/bin/vpngw -maxdepth 1 -type f \
+    -name 'vpn-functions.sh.pre-0.1.*' -print 2>/dev/null | sort | tail -n 1)
+BOT_BACKUP_PATH=$(find /usr/local/bin/vpngw -maxdepth 1 -type f \
+    -name 'vpn-tg-bot.sh.pre-0.1.*' -print 2>/dev/null | sort | tail -n 1)
+[[ -n "$FUNCTIONS_BACKUP_PATH" ]] || FUNCTIONS_BACKUP_PATH="NOT FOUND"
+[[ -n "$BOT_BACKUP_PATH" ]] || BOT_BACKUP_PATH="NOT FOUND"
+FAKE_CLI_TEST_STATUS="NOT FOUND"
+if [[ -f "$REPO_DIR/tests/test_adguard_cli.sh" && "$SOURCE_STATE" == "clean" ]]; then
+    if bash "$REPO_DIR/tests/test_adguard_cli.sh" >/dev/null 2>&1; then
+        FAKE_CLI_TEST_STATUS="PASS"
+    else
+        FAKE_CLI_TEST_STATUS="FAIL"
+    fi
+elif [[ -f "$REPO_DIR/tests/test_adguard_cli.sh" ]]; then
+    FAKE_CLI_TEST_STATUS="NOT RUN (source checkout is dirty)"
+fi
 ROOT_CRONTAB_SHA=$(printf '%s\n' "$CRONTAB_SAFE" | sha256sum | awk '{print $1}')
 ROOT_CRONTAB_LINES=$(printf '%s\n' "$CRONTAB_SAFE" | awk 'NF {count++} END {print count+0}')
 ROOT_CRONTAB_SUMMARY=$(while IFS= read -r cron_line; do
@@ -234,7 +290,7 @@ done <<< "$CRONTAB_SAFE")
 
 {
     printf '# Production inventory update\n\n'
-    printf 'Collected: `%s`\n\n' "$(date --iso-8601=seconds)"
+    printf 'Collected: `%s`\n\n' "$COLLECTED_AT"
     printf 'Host: `%s`\n\n' "$HOST_NAME"
     printf '> Review locally. This report is mode `0600`, may contain internal topology and must not be committed or shared raw. The private snapshot is `%s`.\n\n' "$DETAILS_OUTPUT"
 
@@ -244,7 +300,13 @@ done <<< "$CRONTAB_SAFE")
     printf -- '- OS codename: `%s`\n' "${OS_VERSION_CODENAME:-unknown}"
     printf -- '- Kernel: `%s`\n' "$KERNEL_INFO"
     printf -- '- Architecture: `%s`\n' "$ARCHITECTURE"
-    printf -- '- Production commit SHA: `%s`\n' "$PRODUCTION_SHA"
+    printf -- '- Production repository HEAD: `%s`\n' "$PRODUCTION_REPO_HEAD"
+    printf -- '- Production `vpn-tg-bot.sh` SHA-256: `%s`\n' "$PRODUCTION_BOT_SHA256"
+    printf -- '- Production `vpn-functions.sh` SHA-256: `%s`\n' "$PRODUCTION_FUNCTIONS_SHA256"
+    printf -- '- Source checkout SHA/state: `%s` / `%s`\n' "$SOURCE_SHA" "$SOURCE_STATE"
+    printf -- '- Source `vpn-tg-bot.sh` SHA-256: `%s`\n' "$SOURCE_BOT_SHA256"
+    printf -- '- Source `vpn-functions.sh` SHA-256: `%s`\n' "$SOURCE_FUNCTIONS_SHA256"
+    printf -- '- Production payload matches source files: **%s**\n' "$PRODUCTION_PAYLOAD_MATCH"
     printf -- '- Docker Engine: `%s`\n' "$DOCKER_VERSION"
     printf -- '- Docker Compose: `%s`\n' "$DOCKER_COMPOSE_VERSION"
     printf -- '- Running containers (name | image | state):\n\n```text\n%s\n```\n\n' "$DOCKER_CONTAINERS"
@@ -274,6 +336,26 @@ done <<< "$CRONTAB_SAFE")
     printf -- '- SHA-256 of sanitized crontab: `%s`\n\n' "$ROOT_CRONTAB_SHA"
     printf 'Sanitized schedule summary (command arguments omitted):\n\n%s\n' "$ROOT_CRONTAB_SUMMARY"
     printf '\nFull redacted crontab is only in the private snapshot; review it locally before use.\n\n'
+
+    printf '## Runbook task 0.1: result fields\n\n'
+    printf -- '- Source checkout commit/state: `%s` / `%s`\n' "$SOURCE_SHA" "$SOURCE_STATE"
+    printf -- '- Production repository HEAD (not proof of deployed file contents): `%s`\n' "$PRODUCTION_REPO_HEAD"
+    printf -- '- Production payload matches source files: **%s**\n' "$PRODUCTION_PAYLOAD_MATCH"
+    printf -- '- Source `vpn-tg-bot.sh` SHA-256: `%s`\n' "$SOURCE_BOT_SHA256"
+    printf -- '- Production `vpn-tg-bot.sh` SHA-256: `%s`\n' "$PRODUCTION_BOT_SHA256"
+    printf -- '- Source `vpn-functions.sh` SHA-256: `%s`\n' "$SOURCE_FUNCTIONS_SHA256"
+    printf -- '- Production `vpn-functions.sh` SHA-256: `%s`\n' "$PRODUCTION_FUNCTIONS_SHA256"
+    printf -- '- `vpn-functions.sh` backup path: `%s`\n' "$FUNCTIONS_BACKUP_PATH"
+    printf -- '- `vpn-tg-bot.sh` backup path: `%s`\n' "$BOT_BACKUP_PATH"
+    printf -- '- Fake CLI test: **%s**\n' "$FAKE_CLI_TEST_STATUS"
+    printf -- '- Bot service health: `%s`\n' "$BOT_SERVICE_STATE"
+    printf -- '- VPN interface check: `%s`\n' "$VPN_INTERFACE_STATE"
+    printf -- '- IPv4 forwarding: `%s`\n' "$IP_FORWARD_STATE"
+    printf -- '- Production smoke test: **NOT RUN** (collector never issues a VPN reconnect)\n'
+    printf -- '- Rollback test: **NOT RUN** (backup presence does not prove restore was tested)\n'
+    printf -- '- Operator: `%s`\n' "${SUDO_USER:-not identified}"
+    printf -- '- Collected at: `%s`\n\n' "$COLLECTED_AT"
+    printf 'Manual fields: record any separately authorized production smoke/rollback outcome; do not infer success from service-active or backup-present status.\n\n'
 
     printf '## Private route/firewall snapshot\n\n'
     printf -- '- Full IPv4/IPv6 routes, rules, forwarding sysctls and firewall state are in `%s`; do not commit that file.\n' "$DETAILS_OUTPUT"

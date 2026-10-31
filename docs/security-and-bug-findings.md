@@ -27,7 +27,7 @@
 | F-11 | P1 | Нет лимита/паузы между повторными recovery-попытками в отдельных запусках стартера | [ ] |
 | F-12 | P0 | Telegram bot token передаётся в аргументах curl и виден в process/systemd status | [ ] |
 | F-13 | P2 | Бот стартует до создания `/dev/shm/vpn_stats`, из-за чего первый log write завершается ошибкой | [ ] |
-| F-14 | P1 | Root systemd bot выполняет scripts, изменяемые пользователем `pi` | [ ] |
+| F-14 | P1 | Root systemd bot выполняет production scripts; проверка owner/mode parent dirs и всех root-cron scripts не завершена | [ ] |
 | F-15 | P1 | `/dev/shm/vpn_stats` имеет права `root:root 777` | [ ] |
 | A-01 | P2, архитектурный риск | Shell-боту сложно надёжно обслуживать API, очередь задач и долговременное состояние | [ ] |
 | A-02 | P1 / проверить права | Секреты и операционные настройки/пути читаются из общей shell-конфигурации | [ ] |
@@ -151,7 +151,7 @@
 - **Немедленное действие оператора:** отозвать старый token через BotFather; загрузить новый только в защищённую конфигурацию/credential store; не вставлять его в команды, PR, issue или runbook. После code fix перезапустить unit и проверить, что новое значение не видно в argv/status.
 - **Исправление кода:** убрать секрет из command-line аргументов всех Telegram curl-вызовов (polling/send/answer callback); использовать API client/credential channel, не отражающий URL с token в process list. Простая ротация не устраняет повторное раскрытие.
 - **Проверка закрытия:** fake token, помеченный уникальным тестовым маркером, отсутствует в `ps` args и cgroup/status; Telegram requests работают; secret отсутствует в logs, unit output и test report; старый token отозван.
-- **Последний production snapshot:** collector на 2026-10-31 21:55 MSK всё ещё нашёл настроенный token в argv одного процесса. Ротация и исправление ещё не подтверждены.
+- **Последний production snapshot:** collector на 2026-10-31 23:42 MSK всё ещё нашёл настроенный token в argv одного процесса. Ротация и исправление ещё не подтверждены.
 - Старый token отозван: [ ] Новый credential установлен без копирования в репозиторий: [ ] argv exposure устранён: [ ] Проверка пройдена: [ ]
 - Результат (PR/коммит; не записывать значение token):
 
@@ -168,18 +168,18 @@
 ### F-14. Root bot выполняет изменяемые пользователем `pi` скрипты
 
 - **Приоритет:** P1.
-- **Основание:** production collector показал `User=root` для `vpn-tg-bot.service`, но `/usr/local/bin/vpngw/vpn-tg-bot.sh` и sourced `/usr/local/bin/vpngw/vpn-functions.sh` принадлежат `pi:pi` и имеют mode `755`. Владелец `pi` может менять эти файлы, а systemd затем запускает/источает их с root privileges.
+- **Основание:** production collector показал `User=root` для `vpn-tg-bot.service`. Первый snapshot выявил `pi:pi 755` на bot/functions files; следующий snapshot от 2026-10-31 23:42 показывает `root:root 755` для этих двух файлов. Parent-directory permissions и владельцы всех root-cron scripts ещё не подтверждены.
 - **Риск:** компрометация или ошибочный запуск от пользователя `pi` может превратиться в выполнение произвольного кода от root при следующем запуске/restart бота; root cron также запускает скрипты из этого каталога.
 - **Исправление:** сделать root-executed production code и его каталоги недоступными для записи не-root пользователям (`root:root`, минимальные read/execute modes); оставить write access только в отдельном управляемом deploy path. Убедиться, что rollout/update не возвращает владельца `pi`.
-- **Проверка:** `stat` проверяет владелец и mode всех root-executed scripts, source libraries и parent directories; пользователь `pi` не может изменить их; systemd bot и root cron по-прежнему работают; rollback сохраняет безопасные ownership/mode.
-- Ownership inventory: [x] Исправлено: [ ] Проверка service/cron: [ ] Rollback проверен: [ ]
+- **Проверка:** `stat`/`namei` проверяет владельца и mode всех root-executed scripts, source libraries и parent directories; пользователь `pi` не может изменить ни файл, ни каталог; systemd bot и root cron продолжают работать; rollback сохраняет безопасные ownership/mode.
+- Ownership inventory: [~] Bot/functions files root-owned: [x] Parent dirs/all root scripts audited: [ ] Проверка service/cron: [ ] Rollback проверен: [ ]
 - Результат (PR/коммит/устройство):
 
 ### F-15. Shared runtime state directory доступен на запись всем локальным пользователям
 
 - **Приоритет:** P1.
 - **Файл:** `/dev/shm/vpn_stats` (создаётся/используется несколькими scripts).
-- **Наблюдение:** collector на 2026-10-31 показал `root:root 777`.
+- **Наблюдение:** collector на 2026-10-31 21:55 и 23:42 показал `root:root 777`; исправление в последующем snapshot не подтверждено.
 - **Риск:** любой локальный пользователь может создавать, удалять или подменять offset, auth flags, report timestamps, counters и log files, вызывая DoS, потери/повторы команд или искажение мониторинга.
 - **Исправление:** проверить всех consumers (root cron и root systemd bot), затем установить минимальный mode, вероятно `0700 root:root` для текущих root-only jobs; если появятся непривилегированные workers, выделить им отдельные runtime dirs/group вместо расширения общего каталога. Создавать directory до первого log write, не использовать `chmod 777`.
 - **Проверка:** cold start после очистки `/dev/shm`, mode/owner корректны, bot и cron пишут нужные файлы, непривилегированный пользователь не может создавать/удалять записи.
