@@ -257,7 +257,10 @@ try_connect_queue() {
 
 # --- ОСНОВНАЯ ЛОГИКА ---
 
-mkdir -p "$STATS_DIR"
+if ! ensure_stats_dir; then
+    printf 'Unsafe or missing stats directory: %s (expected root:root 0700)\n' "$STATS_DIR" >&2
+    exit 1
+fi
 inc_stat "cnt_checks"
 check_temp_health
 

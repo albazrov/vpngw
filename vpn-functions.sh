@@ -23,6 +23,48 @@ run_adguard_connect() {
     "$ADG_BIN" connect -l "$location" >/dev/null 2>&1
 }
 
+telegram_api_curl() {
+    local endpoint="${1:-}"
+    shift || return 2
+
+    case "$endpoint" in
+        getUpdates|sendMessage|answerCallbackQuery) ;;
+        *) return 2 ;;
+    esac
+
+    if [[ ! "${TG_TOKEN:-}" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
+        return 78
+    fi
+
+    export -n TG_TOKEN 2>/dev/null || true
+    curl --config <(printf 'url = "https://api.telegram.org/bot%s/%s"\n' "$TG_TOKEN" "$endpoint") "$@"
+}
+
+ensure_private_directory() {
+    local directory="${1:-}"
+    local expected_owner="${2:-}"
+    local expected_group="${3:-}"
+    local expected_mode="${4:-}"
+    local actual
+
+    if [[ -z "$directory" || -z "$expected_owner" || -z "$expected_group" || -z "$expected_mode" ]]; then
+        return 2
+    fi
+    if [[ ! -d "$directory" || -L "$directory" ]]; then
+        return 1
+    fi
+
+    actual=$(stat -c '%u:%g:%a' -- "$directory") || return 1
+    [[ "$actual" == "$expected_owner:$expected_group:$expected_mode" ]]
+}
+
+ensure_stats_dir() {
+    if [[ "${STATS_DIR:-}" != "/dev/shm/vpn_stats" ]]; then
+        return 2
+    fi
+    ensure_private_directory "$STATS_DIR" 0 0 700
+}
+
 check_vpn_connectivity() {
     # Функция принимает один аргумент — имя интерфейса
     local interface="$1"
@@ -127,6 +169,11 @@ check_geo() {
 log_message() {
     local msg="$1"
     local tag="${2:-SYSTEM}" # Если второй параметр не передан, будет [SYSTEM]
+
+    if ! ensure_stats_dir; then
+        printf 'Unsafe or missing stats directory: %s (expected root:root 0700)\n' "${STATS_DIR:-unset}" >&2
+        return 1
+    fi
     
     # Раскрашиваем тег в зависимости от его имени (для удобства чтения)
     local tag_color="$CLR_CYN"
@@ -142,7 +189,7 @@ log_message() {
 
 inc_stat() {
     local file="$STATS_DIR/$1"
-    mkdir -p "$STATS_DIR"
+    ensure_stats_dir || return $?
     local val=$(cat "$file" 2>/dev/null || echo 0)
     echo $((val + 1)) > "$file"
 }

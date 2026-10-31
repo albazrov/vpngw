@@ -157,25 +157,25 @@ Snapshot supplied by the operator on 2026-10-31 (times shown by the host in MSK)
 | State | Active/running | Collector snapshot showed running at 2026-10-31 21:55 MSK |
 | Latest observed service check | Active | Collector snapshot 2026-10-31 23:42 MSK |
 | Main process | `vpn-tg-bot.sh` (`/bin/bash /usr/local/bin/vpngw/vpn-tg-bot.sh`) | PID intentionally not retained from collector |
-| Long-poll child | `curl` calling Telegram `getUpdates` | Collector still found the configured token in argv for one process at 2026-10-31 21:55 MSK; token value omitted |
+| Long-poll child | `curl` calling Telegram `getUpdates` | Pre-fix collector at 23:42 found the configured token in argv for one process; value omitted |
 | Effective group | Default/empty in unit | Collector showed no explicit `Group` value |
 | Sandboxing | `NoNewPrivileges=no`, `PrivateTmp=no`, `ProtectSystem=no`, `ProtectHome=no`, no read/write path restrictions, full capability set | Collector output; service is effectively unsandboxed and runs as root |
 | Startup log error | `vpn-functions.sh` failed to append `/dev/shm/vpn_stats/vpn-live.log` because the parent directory did not exist | Earlier start observation; current directory exists but is world-writable; fix initialization and permissions |
 
-**Credential incident:** the Telegram bot token appeared in the original `systemctl status` output and the collector again found it in argv for one process at 2026-10-31 21:55 MSK. Rotation/remediation is therefore **not yet verified**. Treat the exposed token as compromised: revoke/rotate via BotFather, update the protected runtime config, restart the bot, and verify the replacement no longer appears in process arguments or status output. Do not copy the old/new token into this inventory, logs, PRs or support messages. Rotation alone is insufficient while code still places the replacement token in argv.
+**Credential incident:** the Telegram bot token appeared in the original `systemctl status` output and a collector snapshot at 23:42, before the current source fix. Current source uses a token-safe curl config FD, but production deployment and rotation are **not verified**. Treat the exposed token as compromised: revoke/rotate via BotFather, update the protected runtime config, deploy the fix, and verify the replacement no longer appears in argv/status. Never copy either token into this inventory, logs, PRs or support messages.
 
-Avoid `systemctl status <pid>` and `ps ... args` while the current implementation puts credentials in command-line URLs. Use explicitly selected non-secret unit properties; inspect unit contents locally and redact any `Environment`, URL or credential values before sharing.
+Avoid `systemctl status <pid>` and `ps ... args` until token rotation and deployed argv-safe code are verified. Use explicitly selected non-secret unit properties; inspect unit contents locally and redact any `Environment`, URL or credential values before sharing.
 
 ## Implementation findings and discrepancies
 
 - Tracked scripts source `/etc/vpn-gw.conf`; it is executable shell code, so ownership and write permissions are code-integrity controls as well as secret protection.
-- Collector measured `/etc/vpn-gw.conf` and `/etc/msmtprc` as `root:root 600`; this limits direct reads but does not prevent the bot's current argv token leak.
+- Collector measured `/etc/vpn-gw.conf` and `/etc/msmtprc` as `root:root 600`; this limits direct reads but does not prove credentials were not previously exposed through process argv.
 - `vpn-tg-bot.sh` and `vpn-tg-send.sh` read `TG_TOKEN`; bot checks `TG_CHAT_ID`. Actual values are intentionally absent.
 - The supplied systemd unit runs the bot as `root` with `Type=simple`, `Restart=always`, `RestartSec=10`, and `After=network.target`; collector showed no sandboxing restrictions and the full default capability set. Root execution magnifies the impact of bot compromise and should be addressed in the privilege-separation plan.
 - Collector measured `/usr/local/bin/vpngw/vpn-tg-bot.sh` and `vpn-functions.sh` as `pi:pi` mode `755`, while systemd executes the bot as root and sources the functions file. The `pi` owner can modify code later executed with root privileges; production scripts should be root-owned/non-writable by untrusted accounts and deployed through a controlled privileged process.
 - A later collector snapshot (2026-10-31 23:42) reports both files as `root:root 755`, so file ownership was changed after the earlier finding. F-14 remains open until parent-directory modes and all root-cron scripts are checked and the deployment is tied to a clean approved source SHA.
-- Current bot polling passes the Telegram API URL, including its token path, as a `curl` argument. The supplied systemd cgroup output confirmed command-line exposure; rotate the exposed token and fix argv handling before treating the bot credential as protected.
-- Bot startup previously logged a failure because `/dev/shm/vpn_stats` did not exist at startup. At latest collection the directory exists but is `root:root 777`; verify it is created consistently and tighten permissions. Do not use `chmod 777` as the fix.
+- Source `vpn-functions.sh` now routes Telegram requests through `telegram_api_curl`, which supplies the URL via a config file descriptor instead of curl argv; regression tests cover all bot endpoints and process argv/environment. The latest production report (23:42, before this fix) still found the token in one process. Rotate the exposed credential, deploy the code, then recollect; source changes alone do not prove production remediation.
+- Source scripts now fail closed unless `/dev/shm/vpn_stats` is a real `root:root 0700` directory, and the bypass updater no longer sets mode `777`. The latest production report (23:42, before this fix) showed `root:root 777`; `/etc/tmpfiles.d/vpngw.conf` is not confirmed installed. Use [the example tmpfiles rule](../deploy/vpngw-tmpfiles.conf.example), apply it on the Pi and recollect.
 - Latest collector health snapshot: bot unit `active`, configured VPN interface `tun0` present, `net.ipv4.ip_forward=1`. This is not a full client-routing/connectivity smoke test.
 - `vpn-email-send.sh` assigns `MSMTP_CONF="/etc/msmtprc"` and `MSMTP_ACC="default"` after sourcing the common config, overriding alternatives configured there. `MSMTP_CONF` is also duplicated in the supplied config.
 - `NET_IF_IP`, `ENABLE_SPEED_TEST`, `MIN_SPEED_KBPS` and `LAST_SEND_TIME` had no tracked consumers in the inspected scripts. Check local/untracked consumers before removing them.
@@ -193,9 +193,9 @@ Do not put secret values in this section.
 - `/etc/msmtprc` owner:mode: `root:root 600`
 - `vpn-tg-bot.service`: root, enabled/active, Restart=always/10s, start limit 5 per 10s; no sandboxing restrictions shown
 - Telegram token rotated after argv exposure; date/reference (no token value): `________________`
-- Bot argv no longer contains Telegram token: latest collection was **YES, one process** at 2026-10-31 23:42 MSK
+- Bot argv no longer contains Telegram token: latest **pre-fix** collection was **YES, one process** at 2026-10-31 23:42 MSK; post-deploy check pending
 - Bot/functions files: latest snapshot `root:root 755`; parent directory and all root-executed scripts still need permission audit
-- `/dev/shm/vpn_stats`: `root:root 777`; permission remediation remains open
+- `/dev/shm/vpn_stats`: latest **pre-fix** snapshot `root:root 777`; tmpfiles installation and post-deploy verification pending
 - Cron checked against current root crontab on date: `________________`
 - `/mnt/external_data`: `/dev/sda1`, ext4, about 54 GB free in snapshot
 - Docker Engine/Compose: `29.4.3` / `5.1.3`; Gitea container running

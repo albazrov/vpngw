@@ -23,8 +23,9 @@
 
 - Связь: F-12; инцидент подтверждён предоставленным systemd process output.
 - Задача: оператор отзывает token, показанный в process/status output, и устанавливает replacement через защищённый канал. В коде убрать token из argv всех Telegram curl calls; не считать ротацию достаточным исправлением. Не записывать ни старый, ни новый token в этот PR или runbook.
-- Готово, когда: старый credential отозван; replacement не появляется в process args, systemd cgroup/status, logs и CI; Telegram API calls проходят fake-token regression test.
+- Готово, когда: старый credential отозван; replacement не появляется в process args, systemd cgroup/status, logs и CI; token argv regression test проходит в CI; Telegram API calls работают через credential-safe transport.
 - Статус: [ ] Старый credential revoked: ____ PR/коммит: ____ argv test: ____
+- Прогресс: token-safe curl transport и regression tests реализованы; token rotation и production recheck остаются действиями оператора.
 - **Промт агенту:** «Исправь подтверждённую утечку Telegram token через argv curl во всех Telegram endpoints. Используй credential-safe API transport, добавь regression test с dummy token, проверяющий отсутствие маркера в process argv/logs, не выводи реальные credentials. Rotation выполняет оператор отдельно.»
 
 ### 0.1 Использовать настроенный AdGuard CLI
@@ -52,6 +53,7 @@
 - Готово, когда: после удаления runtime directories и cold start/reboot bot не пишет `No such file or directory`; bot и cron имеют только необходимые права; логи доступны.
 - Статус: [ ] Unit/user/mode inventory: ____ PR/коммит: ____ Cold-start test: ____
 - **Промт агенту:** «Исправь старт Telegram-бота при пустом `/dev/shm`: выясни service user и shared ownership, создай нужные runtime paths до первого `log_message`, не используй `chmod 777`. Добавь тест старта без каталога и опиши cold-start/rollback в runbook.»
+- Прогресс: bot/runtime readers now fail closed unless stats dir is root-owned mode 0700; production tmpfiles installation and cold-start validation remain.
 
 ### 0.4 Запретить `pi` изменять код, исполняемый root
 
@@ -65,11 +67,12 @@
 ### 0.5 Ужесточить права `/dev/shm/vpn_stats`
 
 - Связь: F-15; collector зафиксировал mode `777`.
-- Задача: проверить consumers/создание каталога из `vpn-bypass-update.sh`, `vpn-functions.sh`, bot и root cron; заменить world-writable permissions на минимальные для фактических пользователей. Пока все подтверждённые consumers работают root, рассмотреть `0700 root:root`; если бот переедет на отдельного пользователя — выделить ему отдельные RuntimeDirectory/Group paths, не открывать общий root state.
-- Готово, когда: cold boot создаёт каталог с нужным owner/mode до первого log; bot/cron сохраняют работоспособность; непривилегированный user не может изменять offset/auth flags/counters/logs; восстановление после очистки tmpfs проверено.
+- Задача: проверить consumers/создание каталога из `vpn-bypass-update.sh`, `vpn-functions.sh`, bot и root cron; установить `deploy/vpngw-tmpfiles.conf.example` в `/etc/tmpfiles.d/vpngw.conf` и применить через `systemd-tmpfiles --create`. Текущие consumers работают root, ожидаемый mode `0700 root:root`; если бот переедет на отдельного пользователя — выделить ему отдельные RuntimeDirectory/Group paths. Скрипты должны fail closed при неверных владельце/mode.
+- Готово, когда: cold boot создаёт каталог с нужным owner/mode до первого log; bot/cron сохраняют работоспособность; непривилегированный user не может изменять offset/auth flags/counters/logs; permission/cold-start regression tests проходят в CI.
 - Runbook: до выкладки создать `docs/runbooks/0.5-runtime-dir-permissions.md` с backup/restore state, rollout и тестом на reboot.
 - Статус: [ ] Consumers inventoried: ____ PR/коммит: ____ Mode/cold-start test: ____ Rollback: ____
 - **Промт агенту:** «Исправь F-15: инвентаризируй все consumers `/dev/shm/vpn_stats`, установи минимальные совместимые owner/mode и инициализируй каталог до первого log write. Не используй `chmod 777`. Покрой cold-start, root cron и отказ записи от unprivileged user; добавь deployment/rollback runbook.»
+- Прогресс: `ensure_stats_dir`, permission regression test и tmpfiles example готовы; production rule deployment/validation pending.
 
 ## Этап 1. Ограничить команды и доступ
 

@@ -25,6 +25,11 @@ else
 fi
 # ___ ___ ___ ___ ___ ___ ___ ___ ___ ___ ___ ___ ___ ___
 
+if ! ensure_stats_dir; then
+    printf 'Unsafe or missing stats directory: %s (expected root:root 0700)\n' "$STATS_DIR" >&2
+    exit 1
+fi
+
 log_msg() { log_message "$1" "AUTH-HELPER"; }
 
 # Внутренняя функция для отправки с проверкой результата

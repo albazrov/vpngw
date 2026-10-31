@@ -61,11 +61,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Run unit tests placeholder
+      - name: Run shell regression tests
         run: |
-          echo "Unit tests placeholder"
-          echo "Add project-specific tests here: state logic, retry policy, parsing, command queue."
-          exit 0
+          bash tests/test_adguard_cli.sh
+          bash tests/test_telegram_token_argv.sh
+          bash tests/test_runtime_directory_permissions.sh
 
   smoke-tests:
     name: Smoke tests
@@ -117,7 +117,7 @@ jobs:
               '',
               'Проверено:',
               '- shell validation',
-              '- unit tests placeholder',
+              '- shell regression tests',
               '- smoke tests placeholder',
               '- integration tests placeholder',
               '',

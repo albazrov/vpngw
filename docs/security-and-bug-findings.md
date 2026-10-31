@@ -150,9 +150,9 @@
 - **Риск:** любой пользователь/инструмент, способный читать process command line или status/cgroup output, может получить полномочия Telegram-бота. Token также уже попал в переданное сообщение; считать его скомпрометированным.
 - **Немедленное действие оператора:** отозвать старый token через BotFather; загрузить новый только в защищённую конфигурацию/credential store; не вставлять его в команды, PR, issue или runbook. После code fix перезапустить unit и проверить, что новое значение не видно в argv/status.
 - **Исправление кода:** убрать секрет из command-line аргументов всех Telegram curl-вызовов (polling/send/answer callback); использовать API client/credential channel, не отражающий URL с token в process list. Простая ротация не устраняет повторное раскрытие.
-- **Проверка закрытия:** fake token, помеченный уникальным тестовым маркером, отсутствует в `ps` args и cgroup/status; Telegram requests работают; secret отсутствует в logs, unit output и test report; старый token отозван.
-- **Последний production snapshot:** collector на 2026-10-31 23:42 MSK всё ещё нашёл настроенный token в argv одного процесса. Ротация и исправление ещё не подтверждены.
-- Старый token отозван: [ ] Новый credential установлен без копирования в репозиторий: [ ] argv exposure устранён: [ ] Проверка пройдена: [ ]
+- **Проверка закрытия:** `tests/test_telegram_token_argv.sh` проходит в CI; fake token отсутствует в curl argv и передаётся только через config FD; Telegram requests работают; secret отсутствует в logs/report; старый token отозван оператором.
+- **Последний production snapshot:** collector на 2026-10-31 23:42 MSK (до текущего code fix) нашёл настроенный token в argv одного процесса. Source fix теперь есть; production deployment и rotation не подтверждены.
+- Code fix/regression test: [x] Старый token отозван: [ ] Новый credential установлен без копирования в репозиторий: [ ] Production argv check: [ ]
 - Результат (PR/коммит; не записывать значение token):
 
 ### F-13. Первый log write бота происходит до создания runtime-каталога
@@ -161,8 +161,8 @@
 - **Файл:** [vpn-tg-bot.sh](../vpn-tg-bot.sh), [vpn-functions.sh](../vpn-functions.sh)
 - **Наблюдение:** systemd snapshot сообщил, что append в `/dev/shm/vpn_stats/vpn-live.log` не удался из-за отсутствующего parent directory. Бот пишет startup log до явного создания `STATS_DIR`; общая функция логирования не создаёт каталог.
 - **Риск:** при reboot `/dev/shm` очищается; бот может стартовать раньше cron job, создающей stats directory. Ошибка в логировании может быть потеряна, а первые события бота не попасть в RAM log.
-- **Проверка исправления:** runtime directories создаются до первого log write с согласованным владельцем/группой/mode, совместимыми с systemd bot и root cron; проверить холодный старт/reboot и отсутствие этой ошибки в journal.
-- Код изменён: [ ] Проверка старта после очистки runtime dir пройдена: [ ] Права systemd/cron проверены: [ ]
+- **Проверка исправления:** bot проверяет безопасный stats directory до первого log write; `/etc/tmpfiles.d/vpngw.conf` создаёт его при boot; проверить холодный старт/reboot и отсутствие ошибки в journal.
+- Код guard: [x] Tmpfiles rule установлено на production: [ ] Cold-start/reboot test: [ ] Права systemd/cron проверены: [ ]
 - Результат (PR/коммит/устройство):
 
 ### F-14. Root bot выполняет изменяемые пользователем `pi` скрипты
@@ -181,9 +181,9 @@
 - **Файл:** `/dev/shm/vpn_stats` (создаётся/используется несколькими scripts).
 - **Наблюдение:** collector на 2026-10-31 21:55 и 23:42 показал `root:root 777`; исправление в последующем snapshot не подтверждено.
 - **Риск:** любой локальный пользователь может создавать, удалять или подменять offset, auth flags, report timestamps, counters и log files, вызывая DoS, потери/повторы команд или искажение мониторинга.
-- **Исправление:** проверить всех consumers (root cron и root systemd bot), затем установить минимальный mode, вероятно `0700 root:root` для текущих root-only jobs; если появятся непривилегированные workers, выделить им отдельные runtime dirs/group вместо расширения общего каталога. Создавать directory до первого log write, не использовать `chmod 777`.
-- **Проверка:** cold start после очистки `/dev/shm`, mode/owner корректны, bot и cron пишут нужные файлы, непривилегированный пользователь не может создавать/удалять записи.
-- Исправлено: [ ] Cold-start/cron test: [ ] Проверка запрета записи unprivileged user: [ ]
+- **Исправление:** проверить всех consumers (root cron и root systemd bot), установить `0700 root:root` через `/etc/tmpfiles.d/vpngw.conf` для текущих root-only jobs; scripts должны fail closed при неверных владельце/mode. Если появятся непривилегированные workers, выделить им отдельные runtime dirs/group. Создавать directory до первого log write; не использовать `chmod 777`.
+- **Проверка:** `tests/test_runtime_directory_permissions.sh` проходит в CI; cold start после очистки `/dev/shm` создаёт directory с нужным owner/mode, bot и cron пишут нужные файлы, непривилегированный пользователь не может создавать/удалять записи.
+- Code guard/regression test: [x] Tmpfiles rule deployed: [ ] Cold-start/cron test: [ ] Проверка запрета записи unprivileged user: [ ]
 - Результат (PR/коммит/устройство):
 
 ## Архитектурный риск (не подтверждённая уязвимость)

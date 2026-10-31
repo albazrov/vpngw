@@ -26,6 +26,11 @@ else
 fi
 # ___ ___ ___ ___ ___ ___ ___ ___ ___ ___ ___ ___ ___ ___
 
+if ! ensure_stats_dir; then
+    printf 'Unsafe or missing stats directory: %s (expected root:root 0700)\n' "$STATS_DIR" >&2
+    exit 1
+fi
+
 # Локальные переменные для защиты от запуска нескольких копий
 LOCK_FILE="/dev/shm/vpn-bypass-update.lock"
 DEBUG=true
@@ -44,8 +49,10 @@ debug_log() { $DEBUG && log_message "DEBUG: $1" "BYPASS"; }
 setup_infrastructure() {
     debug_log "Checking system infrastructure..." "BYPASS"
     
-    [ -d "$STATS_DIR" ] || mkdir -p "$STATS_DIR"
-    chmod 777 "$STATS_DIR" 2>/dev/null
+    ensure_stats_dir || {
+        printf 'Unsafe or missing stats directory: %s (expected root:root 0700)\n' "$STATS_DIR" >&2
+        return 1
+    }
 
 
     # 1. IP Forwarding (Используем полный путь для надежности в CRON)

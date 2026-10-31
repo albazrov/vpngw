@@ -1,0 +1,4 @@
+# Install as /etc/tmpfiles.d/vpngw.conf.
+# Volatile gateway state is shared only by root cron jobs and the root bot unit.
+d /dev/shm/vpn_stats 0700 root root -
+z /dev/shm/vpn_stats 0700 root root -
