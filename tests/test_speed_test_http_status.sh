@@ -12,7 +12,7 @@ EOF
 chmod +x "$TEST_DIR/curl"
 export PATH="$TEST_DIR:$PATH"
 
-# shellcheck source=../vpn-functions.sh
+# shellcheck source=vpn-functions.sh
 source "$ROOT_DIR/vpn-functions.sh"
 
 if FAKE_HTTP_CODE=302 get_vpn_download_speed tun0 custom \
