@@ -10,6 +10,7 @@
 CONF_FILE="/etc/vpn-gw.conf"
 
 if [ -f "$CONF_FILE" ]; then
+    # shellcheck disable=SC1090
     source "$CONF_FILE"
 else
     echo "[ERROR] Config file $CONF_FILE not found!" >&2
@@ -19,6 +20,7 @@ fi
 # Динамически подключаем библиотеку функций, используя переменную пути из конфига
 FUNCTIONS_LIB="${VPNGW_FUNCTIONS:-$MAIN_SH_DIR/vpn-functions.sh}"
 if [ -f "$FUNCTIONS_LIB" ]; then
+    # shellcheck disable=SC1090
     source "$FUNCTIONS_LIB"
 else
     echo "Ошибка: Библиотека функций $FUNCTIONS_LIB не найдена!" >&2
@@ -101,8 +103,8 @@ setup_infrastructure() {
 
     # 6. IPTABLES (Mangle)
     # Исключения для локального трафика в цепочках
-    sudo iptables -t mangle -C PREROUTING -d $HOME_NET -j RETURN 2>/dev/null || sudo iptables -t mangle -I PREROUTING -d $HOME_NET -j RETURN
-    sudo iptables -t mangle -C OUTPUT -d $HOME_NET -j RETURN 2>/dev/null || sudo iptables -t mangle -I OUTPUT -d $HOME_NET -j RETURN
+    sudo iptables -t mangle -C PREROUTING -d "$HOME_NET" -j RETURN 2>/dev/null || sudo iptables -t mangle -I PREROUTING -d "$HOME_NET" -j RETURN
+    sudo iptables -t mangle -C OUTPUT -d "$HOME_NET" -j RETURN 2>/dev/null || sudo iptables -t mangle -I OUTPUT -d "$HOME_NET" -j RETURN
     
     # Маркировка RU трафика
     sudo iptables -t mangle -C PREROUTING -m set --match-set "$IPSET_NAME" dst -j MARK --set-mark "$MARK" 2>/dev/null || \
@@ -150,15 +152,22 @@ update_ips() {
     
     # 1. Попытка скачать свежие данные
     # Добавлен флаг -L (редирект) и -4 (IPv4) для стабильности на RPi4
-    local raw_data=$(timeout 60s curl -sL4 --interface "$NET_IF" "$SOURCE_URL")
+    local raw_data
+    raw_data=$(timeout 60s curl -sL4 --interface "$NET_IF" "$SOURCE_URL")
     
     if [ -n "$raw_data" ] && [[ "$raw_data" == *"/"* ]]; then
-        local count=$(echo "$raw_data" | grep -c '/')
+        local count
+        count=$(echo "$raw_data" | grep -c '/')
         # Сохраняем резервную копию на флешку
         echo "$raw_data" > "$IPSET_CACHE"
         
         # Обновляем ipset в памяти
-        { echo "flush $IPSET_NAME"; echo "$raw_data" | sed "s/^/add $IPSET_NAME /"; } | sudo ipset restore
+        {
+            echo "flush $IPSET_NAME"
+            while IFS= read -r network; do
+                printf 'add %s %s\n' "$IPSET_NAME" "$network"
+            done <<< "$raw_data"
+        } | sudo ipset restore
         
         debug_log "Success: Downloaded $count ranges from $SOURCE_URL." "BYPASS"
         debug_log "Update successful. Cache updated." "BYPASS"
@@ -167,7 +176,8 @@ update_ips() {
 
     # 2. Если скачать не удалось — проверяем память
     debug_log "ERROR: Download failed. Checking alternatives..." "BYPASS"
-    local current_entries=$(sudo ipset list "$IPSET_NAME" | grep "Number of entries" | awk '{print $4}' || echo 0)
+    local current_entries
+    current_entries=$(sudo ipset list "$IPSET_NAME" | grep "Number of entries" | awk '{print $4}' || echo 0)
 
     if [ "$current_entries" -gt 100 ]; then
         debug_log "Alternative: Keeping $current_entries entries already present in RAM." "BYPASS"
@@ -178,10 +188,13 @@ update_ips() {
     # 3. Если в памяти пусто — проверяем кэш на флешке
     debug_log "Alternative: RAM is empty. Checking disk cache at $IPSET_CACHE..." "BYPASS"
     if [ -f "$IPSET_CACHE" ]; then
-        local cache_count=$(grep -c '/' "$IPSET_CACHE")
-        local cache_date=$(date -r "$IPSET_CACHE" "+%d.%m.%Y %H:%M")
+        local cache_count cache_date
+        cache_count=$(grep -c '/' "$IPSET_CACHE")
+        cache_date=$(date -r "$IPSET_CACHE" "+%d.%m.%Y %H:%M")
         
-        cat "$IPSET_CACHE" | sed "s/^/add $IPSET_NAME /" | sudo ipset restore
+        while IFS= read -r network; do
+            printf 'add %s %s\n' "$IPSET_NAME" "$network"
+        done < "$IPSET_CACHE" | sudo ipset restore
         
         debug_log "Alternative success: Loaded $cache_count ranges from disk cache (dated $cache_date)." "BYPASS"
         send_tg "[$SYSTEM_NAME] ‼️ База не скачана. Загружен кэш с флешки от $cache_date ($cache_count записей)."
