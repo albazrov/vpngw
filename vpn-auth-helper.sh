@@ -5,10 +5,16 @@
 # RPi4B
 # vpn-auth-helper.sh
 
+if [[ ${EUID} -ne 0 ]]; then
+    echo "Run as root: sudo bash $0" >&2
+    exit 1
+fi
+
 # --- ПОДКЛЮЧЕНИЕ ПЕРЕМЕННЫХ И ДОПОЛНИТЕЛЬНЫЕ ФУНКЦИИ ---
 CONF_FILE="/etc/vpn-gw.conf"
 
 if [ -f "$CONF_FILE" ]; then
+    # shellcheck disable=SC1090
     source "$CONF_FILE"
 else
     echo "[ERROR] Config file $CONF_FILE not found!" >&2
@@ -18,12 +24,18 @@ fi
 # Динамически подключаем библиотеку функций, используя переменную пути из конфига
 FUNCTIONS_LIB="$MAIN_SH_DIR/vpn-functions.sh"
 if [ -f "$FUNCTIONS_LIB" ]; then
+    # shellcheck disable=SC1090
     source "$FUNCTIONS_LIB"
 else
     echo "Ошибка: Библиотека функций $FUNCTIONS_LIB не найдена!" >&2
     exit 1
 fi
 # ___ ___ ___ ___ ___ ___ ___ ___ ___ ___ ___ ___ ___ ___
+
+if ! ensure_stats_dir; then
+    printf 'Unsafe or missing stats directory: %s (expected root:root 0700)\n' "$STATS_DIR" >&2
+    exit 1
+fi
 
 log_msg() { log_message "$1" "AUTH-HELPER"; }
 
@@ -39,9 +51,7 @@ safe_send_email() {
     log_msg "$msg_type link captured. Sending Email..."
     
     # Передаем и тему, и тело сообщения
-    "$MAIN_SH_DIR/vpn-email-send.sh" "$alert_subject" "$alert_body"
-    
-    if [ $? -eq 0 ]; then
+    if "$MAIN_SH_DIR/vpn-email-send.sh" "$alert_subject" "$alert_body"; then
         echo "$url" > "$LAST_URL_FILE"
         log_msg "Email sent successfully. Link saved to history."
         return 0
@@ -66,7 +76,7 @@ if [ -f "$AUTH_FLAG" ]; then
     session_healthy=true
     
     # А) Проверка размера
-    local file_size=$(du -k "$AUTH_TMP" 2>/dev/null | cut -f1 || echo 0)
+    file_size=$(du -k "$AUTH_TMP" 2>/dev/null | cut -f1 || echo 0)
     [ "$file_size" -gt 1024 ] && session_healthy=false && log_msg "WARN: Log too large."
     
     # Б) Проверка времени (25 минут)
@@ -137,7 +147,7 @@ pkill -f "adguardvpn-cli login" 2>/dev/null
 rm -f "$AUTH_FLAG" "$AUTH_TMP" "$LAST_URL_FILE" # Полная чистка перед стартом
 touch "$AUTH_FLAG"
 
-sudo nohup setsid /usr/bin/script -q -c "/opt/adguardvpn_cli/adguardvpn-cli login" /dev/null > "$AUTH_TMP" 2>&1 &
+nohup setsid /usr/bin/script -q -c "/opt/adguardvpn_cli/adguardvpn-cli login" /dev/null > "$AUTH_TMP" 2>&1 &
 
 sleep 10
 AUTH_URL=$(grep -oP 'https://\S+device_code\?\S+' "$AUTH_TMP" | tail -n 1)

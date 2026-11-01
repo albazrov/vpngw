@@ -8,6 +8,7 @@
 # 1. Подключаем основной конфигурационный файл
 CONF_FILE="/etc/vpn-gw.conf"
 if [ -f "$CONF_FILE" ]; then
+    # shellcheck disable=SC1090
     source "$CONF_FILE"
 else
     echo "Ошибка: Конфигурационный файл $CONF_FILE не найден!" >&2
@@ -17,9 +18,15 @@ fi
 # 2. Динамически подключаем библиотеку функций, используя переменную пути из конфига
 FUNCTIONS_LIB="$MAIN_SH_DIR/vpn-functions.sh"
 if [ -f "$FUNCTIONS_LIB" ]; then
+    # shellcheck disable=SC1090
     source "$FUNCTIONS_LIB"
 else
     echo "Ошибка: Библиотека функций $FUNCTIONS_LIB не найдена!" >&2
+    exit 1
+fi
+
+if ! ensure_stats_dir; then
+    printf 'Unsafe or missing stats directory: %s (expected root:root 0700)\n' "$STATS_DIR" >&2
     exit 1
 fi
 
@@ -34,7 +41,8 @@ should_send() {
     [ "$enabled" != "true" ] && return 1
     [ ! -f "$label_file" ] && return 0  # Если файла-метки нет — шлем сразу
 
-    local last_send=$(cat "$label_file" 2>/dev/null || echo 0)
+    local last_send
+    last_send=$(cat "$label_file" 2>/dev/null || echo 0)
     local elapsed_min=$(( (NOW_SEC - last_send) / 60 ))
 
     if [ "$elapsed_min" -ge "$interval_min" ]; then
@@ -63,14 +71,14 @@ fi
 
 # Сбор параметров RAM
 MEM_INFO=$(free -m | grep Mem)
-MEM_TOTAL=$(echo $MEM_INFO | awk '{print $2}')
-MEM_FREE=$(echo $MEM_INFO | awk '{print $7}')
+MEM_TOTAL=$(echo "$MEM_INFO" | awk '{print $2}')
+MEM_FREE=$(echo "$MEM_INFO" | awk '{print $7}')
 MEM_PCT=$(( 100 * MEM_FREE / MEM_TOTAL ))
 
 # Сбор параметров Диска
 DISK_INFO=$(df -h "$LOG_DISK" | tail -1)
-DISK_FREE=$(echo $DISK_INFO | awk '{print $4}')
-DISK_PCT=$(echo $DISK_INFO | awk '{print $5}' | tr -d '%')
+DISK_FREE=$(echo "$DISK_INFO" | awk '{print $4}')
+DISK_PCT=$(echo "$DISK_INFO" | awk '{print $5}' | tr -d '%')
 DISK_PCT_FREE=$(( 100 - DISK_PCT ))
 
 # Статистика и инфраструктура
@@ -92,7 +100,7 @@ UPTIME=$(uptime -p | sed 's/up //')
 if [ -f "$AUTH_FLAG" ]; then
     ELAPSED=$(( $(date +%s) - $(stat -c %Y "$AUTH_FLAG") ))
     REMAINING=$(( (1800 - ELAPSED) / 60 ))
-    [ $REMAINING -lt 0 ] && REMAINING=0
+    [ "$REMAINING" -lt 0 ] && REMAINING=0
     AUTH_STATE="⏳ Ожидание (истечет через ${REMAINING} мин)"
 else
     AUTH_STATE="✅ OK"
@@ -143,9 +151,7 @@ if should_send "$REPORT_TO_EMAIL" "$REPORT_EMAIL_INTERVAL" "$EM_LAST_SEND_FILE";
 🧠 Свободная RAM: $MEM_FREE МБ ($MEM_PCT%)
 💾 Свободно на Flash: $DISK_FREE ($DISK_PCT_FREE%)"
 
-    "$MAIN_SH_DIR/vpn-email-send.sh" "$EMAIL_SUBJECT" "$EMAIL_REPORT"
-    
-    if [ $? -eq 0 ]; then
+    if "$MAIN_SH_DIR/vpn-email-send.sh" "$EMAIL_SUBJECT" "$EMAIL_REPORT"; then
         echo "$NOW_SEC" > "$EM_LAST_SEND_FILE"
         log_message "Accumulated report successfully sent to Email (Interval: ${REPORT_EMAIL_INTERVAL}m)" "REPORT"
         
@@ -162,6 +168,6 @@ fi
 if [ "$(date +%M)" -ge 55 ]; then
     if [ -f "/dev/shm/vpn_stats/vpn-live.log" ]; then
         cat /dev/shm/vpn_stats/vpn-live.log >> /mnt/external_data/vpn-gateway.log
-        > /dev/shm/vpn_stats/vpn-live.log
+        : > /dev/shm/vpn_stats/vpn-live.log
     fi
 fi

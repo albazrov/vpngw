@@ -1,0 +1,4 @@
+Cmnd_Alias VPNGW_SWITCH = /usr/local/sbin/vpngw-root-switch RO, \
+    /usr/local/sbin/vpngw-root-switch DE, \
+    /usr/local/sbin/vpngw-root-switch FI
+vpngw-bot ALL=(root) NOPASSWD: VPNGW_SWITCH

@@ -9,6 +9,7 @@
 CONF_FILE="/etc/vpn-gw.conf"
 
 if [ -f "$CONF_FILE" ]; then
+    # shellcheck disable=SC1090
     source "$CONF_FILE"
 else
     echo "[ERROR] Config file $CONF_FILE not found!" >&2
@@ -18,9 +19,10 @@ fi
 
 if [ -s "$LOG_RAM" ]; then
     cat "$LOG_RAM" >> "$LOG_DISK"
-    > "$LOG_RAM"
+    : > "$LOG_RAM"
     # Ротация архивного лога (2МБ)
-    if [ $(stat -c%s "$LOG_DISK") -gt 2097152 ]; then
+    log_size=$(stat -c%s "$LOG_DISK")
+    if [ "$log_size" -gt 2097152 ]; then
         mv "$LOG_DISK" "${LOG_DISK}.1"
         touch "$LOG_DISK"
     fi

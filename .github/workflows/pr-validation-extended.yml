@@ -1,6 +1,7 @@
 name: Extended PR validation
 
 on:
+  workflow_dispatch:
   pull_request:
     branches:
       - dev
@@ -48,10 +49,11 @@ jobs:
       - name: ShellCheck lint
         if: steps.shell_files.outputs.count != '0'
         run: |
-          mapfile -d '' files < <(find . -type f -name '*.sh' -print0)
+          # The legacy shell Telegram bot is unsupported by the Python release.
+          mapfile -d '' files < <(find . -type f -name '*.sh' ! -path './vpn-tg-bot.sh' -print0)
           for f in "${files[@]}"; do
             echo "shellcheck $f"
-            shellcheck "$f"
+            shellcheck -x "$f"
           done
 
   unit-tests:
@@ -61,11 +63,23 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Run unit tests placeholder
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Python dependencies
+        run: python -m pip install -r python_bot/requirements.txt
+
+      - name: Run shell regression tests
         run: |
-          echo "Unit tests placeholder"
-          echo "Add project-specific tests here: state logic, retry policy, parsing, command queue."
-          exit 0
+          bash tests/test_adguard_cli.sh
+          bash tests/test_telegram_token_argv.sh
+          bash tests/test_runtime_directory_permissions.sh
+          bash tests/test_speed_test_http_status.sh
+
+      - name: Run Python bot tests
+        run: python -m pytest -q python_bot/tests
 
   smoke-tests:
     name: Smoke tests
@@ -117,7 +131,7 @@ jobs:
               '',
               'Проверено:',
               '- shell validation',
-              '- unit tests placeholder',
+              '- shell regression tests',
               '- smoke tests placeholder',
               '- integration tests placeholder',
               '',

@@ -15,6 +15,8 @@ else
     exit 1
 fi
 
+export -n TG_TOKEN 2>/dev/null || true
+
 # 2. Динамически подключаем библиотеку функций, используя переменную пути из конфига
 FUNCTIONS_LIB="$MAIN_SH_DIR/vpn-functions.sh"
 if [ -f "$FUNCTIONS_LIB" ]; then
@@ -24,6 +26,10 @@ else
     exit 1
 fi
 
+if ! ensure_stats_dir; then
+    printf 'Unsafe or missing stats directory: %s (expected root:root 0700)\n' "$STATS_DIR" >&2
+    exit 1
+fi
 
 [ -f "$OFFSET_FILE" ] && OFFSET=$(cat "$OFFSET_FILE") || OFFSET=0
 
@@ -46,10 +52,10 @@ send_bot_menu() {
     }')
     
     # Лучший вариант: с таймаутами, проверкой HTTP-кода и поддержкой кнопок
-    local http_code=$(curl -s -4 -o /dev/null -w "%{http_code}" \
+    local http_code=$(telegram_api_curl sendMessage -s -4 -o /dev/null -w "%{http_code}" \
         --connect-timeout 5 --max-time 10 \
         -H "Content-Type: application/json" \
-        -X POST "https://api.telegram.org/bot$TG_TOKEN/sendMessage" \
+        -X POST \
         -d "$(jq -n --arg chat "$chat_id" --arg text "📍 Выберите локацию для переключения AdGuard VPN шлюза:" --argjson kb "$keyboard" \
             '{chat_id: $chat, text: $text, reply_markup: $kb}')")
 
@@ -62,7 +68,8 @@ send_bot_menu() {
 log_msg "Telegram Control Bot daemon started."
 
 while true; do
-    UPDATES=$(curl -s -4 --connect-timeout 35 "https://api.telegram.org/bot$TG_TOKEN/getUpdates?offset=$OFFSET&timeout=30")
+    UPDATES=$(telegram_api_curl getUpdates -s -4 --connect-timeout 35 --max-time 40 \
+        --get --data-urlencode "offset=$OFFSET" --data-urlencode "timeout=30")
     
     # Оптимальный и быстрый вариант проверки:
     if [ -z "$UPDATES" ]; then sleep 5; continue; fi
@@ -96,8 +103,8 @@ while true; do
             
             # Быстрое подтверждение клика, чтобы в интерфейсе скрылись часики ожидания
             if [ -n "$CALLBACK_ID" ]; then
-                curl -s -4 --connect-timeout 3 --max-time 5 \
-                     "https://api.telegram.org/bot$TG_TOKEN/answerCallbackQuery?callback_query_id=$CALLBACK_ID" > /dev/null
+                telegram_api_curl answerCallbackQuery -s -4 --connect-timeout 3 --max-time 5 \
+                    --get --data-urlencode "callback_query_id=$CALLBACK_ID" > /dev/null
             fi
         fi
 
@@ -151,8 +158,15 @@ while true; do
                 # Отправляем через вашу очередь
                 send_tg "🔄 *[$SYSTEM_NAME]* Выполняю переключение на локацию *$LOC_ISO*..."
                 
-                # Переключаем AdGuard
-                "ADG_BIN" connect -l "$LOC_ISO" > /dev/null 2>&1
+                if run_adguard_connect "$LOC_ISO"; then
+                    :
+                else
+                    CLI_EXIT=$?
+                    log_msg "ERROR: AdGuard CLI connect failed (exit $CLI_EXIT) for $LOC_ISO"
+                    send_tg "❌ *[$SYSTEM_NAME]* Не удалось запустить подключение к *$LOC_ISO* (код $CLI_EXIT). Маршруты не изменены."
+                    continue
+                fi
+
                 sleep 5
                 
                 # Перестраиваем таблицы маршрутизации

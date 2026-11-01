@@ -1,0 +1,10 @@
+# Safe bot config: non-secret values only.
+# Ownership should be root:pi and mode 0640.
+MAIN_SH_DIR="/home/pi/app/vpngw"
+VPN_IF="tun0"
+VPNGW_SPEED_CONFIG="/etc/vpngw-speed-tests.conf"
+ADG_BIN="/opt/adguardvpn_cli/adguardvpn-cli"
+VPNGW_SWITCH_BIN="/usr/local/sbin/vpngw-root-switch"
+SYSTEM_NAME="RPi4B"
+STATS_DIR="/dev/shm/vpn_stats"
+LOG_RAM="/dev/shm/vpn_stats/vpngw.log"

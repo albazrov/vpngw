@@ -1,0 +1,5 @@
+# Install as /etc/tmpfiles.d/vpngw.conf.
+# Volatile gateway state is used by root cron jobs and privileged VPN helpers.
+# The unprivileged Python Telegram service does not access this directory.
+d /dev/shm/vpn_stats 0700 root root -
+z /dev/shm/vpn_stats 0700 root root -
