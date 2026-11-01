@@ -53,7 +53,7 @@ jobs:
           mapfile -d '' files < <(find . -type f -name '*.sh' ! -path './vpn-tg-bot.sh' -print0)
           for f in "${files[@]}"; do
             echo "shellcheck $f"
-            shellcheck "$f"
+            shellcheck -x "$f"
           done
 
   unit-tests:
