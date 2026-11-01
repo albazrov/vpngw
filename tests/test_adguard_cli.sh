@@ -14,8 +14,17 @@ exit "${FAKE_EXIT_CODE:-0}"
 EOF
 chmod +x "$TEST_DIR/adguard-cli"
 
+cat > "$TEST_DIR/sudo" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "-n" ]]; then shift; fi
+if [[ "${1:-}" == "--" ]]; then shift; fi
+exec "$@"
+EOF
+chmod +x "$TEST_DIR/sudo"
+
 export CAPTURE_FILE="$TEST_DIR/arguments"
 export ADG_BIN="$TEST_DIR/adguard-cli"
+export PATH="$TEST_DIR:$PATH"
 
 run_adguard_connect "DE"
 [[ "$(<"$CAPTURE_FILE")" == "connect -l DE" ]]

@@ -61,11 +61,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install Python dependencies
+        run: python -m pip install -r python_bot/requirements.txt
+
       - name: Run shell regression tests
         run: |
           bash tests/test_adguard_cli.sh
           bash tests/test_telegram_token_argv.sh
           bash tests/test_runtime_directory_permissions.sh
+
+      - name: Run Python bot tests
+        run: python -m pytest -q python_bot/tests
 
   smoke-tests:
     name: Smoke tests
