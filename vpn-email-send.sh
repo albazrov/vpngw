@@ -8,6 +8,7 @@
 CONF_FILE="/etc/vpn-gw.conf"
 
 if [ -f "$CONF_FILE" ]; then
+    # shellcheck disable=SC1090
     source "$CONF_FILE"
 else
     echo "[ERROR] Config file $CONF_FILE not found!" >&2
@@ -34,9 +35,7 @@ ENCODED_SUBJECT=$(echo -n "$RAW_SUBJECT" | base64 | tr -d '\n')
 SUBJECT="=?UTF-8?B?${ENCODED_SUBJECT}?="
 
 # Отправка через msmtp по проверенной и рабочей схеме
-echo -e "From: $FROMTEXT <$FROM>\nTo: $TO\nSubject: $SUBJECT\n\n$MESSAGE" | msmtp -C "$MSMTP_CONF" -a "$MSMTP_ACC" al.bazrov@yandex.ru tunmonitor@gmail.com
-
-if [ $? -eq 0 ]; then
+if echo -e "From: $FROMTEXT <$FROM>\nTo: $TO\nSubject: $SUBJECT\n\n$MESSAGE" | msmtp -C "$MSMTP_CONF" -a "$MSMTP_ACC" al.bazrov@yandex.ru tunmonitor@gmail.com; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') - [EMAIL-SEND] Success sent to mail boxes" >> "$LOG_RAM"
     exit 0
 else
