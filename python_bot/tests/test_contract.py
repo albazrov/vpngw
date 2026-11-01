@@ -148,6 +148,40 @@ def test_custom_speed_profile_rejects_private_dns(tmp_path, monkeypatch):
         SafeAdapter().execute("speed", profile)
 
 
+def test_custom_speed_profile_rejects_ipv6_only_endpoint(tmp_path, monkeypatch):
+    _make_fake_functions(tmp_path)
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2001:4860:4860::8888", 443, 0, 0))
+        ],
+    )
+    profile = {
+        "profile": "ipv6",
+        "name": "IPv6 Test",
+        "url": "https://speed.example/file",
+        "connect_timeout": 5,
+        "max_time": 20,
+    }
+    with pytest.raises(AdapterError, match="публичный IPv4"):
+        SafeAdapter().execute("speed", profile)
+
+
+def test_custom_speed_profile_rejects_ipv6_only_endpoint_on_add(tmp_path, monkeypatch):
+    _make_fake_functions(tmp_path)
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2001:4860:4860::8888", 443, 0, 0))
+        ],
+    )
+
+    with pytest.raises(AdapterError, match="публичный IPv4"):
+        SafeAdapter().verify_custom_speed_endpoint("https://speed.example/file")
+
+
 def test_custom_speed_profile_runs_through_public_pinned_endpoint(tmp_path, monkeypatch):
     _make_fake_functions(tmp_path)
     monkeypatch.setattr(
@@ -232,6 +266,9 @@ def test_admin_can_add_speed_profile():
 
         def speed_options(self):
             return []
+
+        def verify_custom_speed_endpoint(self, url):
+            return None
 
     class FakeState:
         def __init__(self):

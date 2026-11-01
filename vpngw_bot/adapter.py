@@ -111,7 +111,12 @@ class SafeAdapter:
         if any(not address.is_global for address in parsed_addresses):
             raise AdapterError("Сервис должен разрешаться только в публичные IP-адреса.")
         ipv4 = next((str(address) for address in parsed_addresses if address.version == 4), None)
-        return hostname, ipv4 or str(parsed_addresses[0])
+        if ipv4 is None:
+            raise AdapterError("Сервис должен иметь публичный IPv4-адрес.")
+        return hostname, ipv4
+
+    def verify_custom_speed_endpoint(self, url: str) -> None:
+        self._resolve_public_endpoint(url)
 
     def _run_bash(self, action: str, payload: dict[str, Any]) -> str:
         config_path = self._config_path()

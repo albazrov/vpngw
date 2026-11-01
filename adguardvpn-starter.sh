@@ -9,6 +9,7 @@
 CONF_FILE="/etc/vpn-gw.conf"
 
 if [ -f "$CONF_FILE" ]; then
+    # shellcheck disable=SC1090
     source "$CONF_FILE"
 else
     echo "[ERROR] Config file $CONF_FILE not found!" >&2
@@ -18,6 +19,7 @@ fi
 # Динамически подключаем библиотеку функций, используя переменную пути из конфига
 FUNCTIONS_LIB="$MAIN_SH_DIR/vpn-functions.sh"
 if [ -f "$FUNCTIONS_LIB" ]; then
+    # shellcheck disable=SC1090
     source "$FUNCTIONS_LIB"
 else
     echo "Ошибка: Библиотека функций $FUNCTIONS_LIB не найдена!" >&2
@@ -44,6 +46,7 @@ if ! flock -n 8; then
 fi
 
 # --- ОТПРАВКА СООБЩЕНИЙ  ---
+# shellcheck disable=SC2329
 send_alert() {
     local mode="$1"    # Режим: "CRITICAL" (падение) или "OK" (восстановление)
     local message="$2" # Текст сообщения для Telegram (с Markdown-звездочками)
@@ -78,17 +81,19 @@ send_alert() {
     send_tg "$tg_msg"
 
     # 3. Отправка на Email (вычищаем Markdown-звездочки из тела письма для красоты)
-    local clean_em_body=$(echo -e "$em_body" | tr -d '*')
+    local clean_em_body
+    clean_em_body=$(echo -e "$em_body" | tr -d '*')
     "$MAIN_SH_DIR/vpn-email-send.sh" "$em_subj" "$clean_em_body"
 }
 
 
 # --- ФУНКЦИИ ПРОВЕРКИ ---
 check_geo() {
-    local geo_raw=$(timeout 15s curl -sL --interface "$VPN_IF" "http://ip-api.com/line/?fields=status,countryCode,query" | tr -d '\r')
-    local g_status=$(echo "$geo_raw" | sed -n '1p')
-    local g_country=$(echo "$geo_raw" | sed -n '2p' | tr '[:lower:]' '[:upper:]')
-    local g_ip=$(echo "$geo_raw" | sed -n '3p')
+    local geo_raw g_status g_country g_ip
+    geo_raw=$(timeout 15s curl -sL --interface "$VPN_IF" "http://ip-api.com/line/?fields=status,countryCode,query" | tr -d '\r')
+    g_status=$(echo "$geo_raw" | sed -n '1p')
+    g_country=$(echo "$geo_raw" | sed -n '2p' | tr '[:lower:]' '[:upper:]')
+    g_ip=$(echo "$geo_raw" | sed -n '3p')
 
     if [ "$g_status" = "success" ] && [ -n "$g_country" ]; then
         debug_log "External IP: [$g_ip], Geo: [$g_country]"
@@ -142,7 +147,8 @@ build_queue() {
     local mode="$1"
 
     # 1. Сначала всегда приоритеты из конфига
-    local QUEUE=$(printf "%s\n" "${PRIORITY_LOCS[@]}" | tr ' ' '\n' | awk '!seen[$0]++' | xargs)
+    local QUEUE
+    QUEUE=$(printf "%s\n" "${PRIORITY_LOCS[@]}" | tr ' ' '\n' | awk '!seen[$0]++' | xargs)
     
     # 2. Если нужны дополнительные локации (расширенный поиск)
     if [ "$mode" == "full" ]; then
@@ -151,11 +157,12 @@ build_queue() {
         [ -s "$CACHE_FILE" ] && SRC="$CACHE_FILE" || SRC="$LOC_CACHE_DISK"
         
         if [ -s "$SRC" ]; then
-            local ALL_ISO=$(tail -n +2 "$SRC" | awk '{print $1}' | grep -xE '[A-Z]{2}' | awk '!seen[$0]++')
+            local ALL_ISO
+            ALL_ISO=$(tail -n +2 "$SRC" | awk '{print $1}' | grep -xE '[A-Z]{2}' | awk '!seen[$0]++')
             for ISO in $ALL_ISO; do
                 # Проверка на исключения и дубли в PRIORITY_LOCS
-                [[ " ${PRIORITY_LOCS[*]} " =~ " ${ISO} " ]] && continue
-                [[ " ${EXCLUDE_LOCS[*]} " =~ " ${ISO} " ]] && continue
+                [[ " ${PRIORITY_LOCS[*]} " == *" ${ISO} "* ]] && continue
+                [[ " ${EXCLUDE_LOCS[*]} " == *" ${ISO} "* ]] && continue
                 QUEUE+="$ISO "
             done
         fi
@@ -232,12 +239,14 @@ try_connect_queue() {
         
         # 5. Проверка результата
         if check_internet; then
-            local end_time=$(date '+%H:%M:%S')
+            local end_time
+            end_time=$(date '+%H:%M:%S')
             debug_log "SUCCESS: Connected to $LOC."
             inc_stat "cnt_recon"
             
             # Формируем короткое сообщение (основные детали функция em_body сгенерирует сама ниже)
-            local tg_report="VPN восстановлен!
+            local tg_report
+            tg_report="VPN восстановлен!
 📍 Локация: *$LOC*
 ⏰ Сбой обнаружен: *$start_time*
 🏁 Восстановлено: *$end_time*
@@ -267,8 +276,9 @@ check_temp_health
 # 0. Если мы в режиме ожидания авторизации — не проверяем интернет, сразу к хелперу
 if [ -f "$AUTH_FLAG" ]; then
     debug_log "System in AUTH_WAIT mode. Checking helper..."
-    "$MAIN_SH_DIR/vpn-auth-helper.sh" 8>&-
-    [ $? -eq 0 ] || exit 0
+    if ! "$MAIN_SH_DIR/vpn-auth-helper.sh" 8>&-; then
+        exit 0
+    fi
 fi
 
 # ПЕРВАЯ И ГЛАВНАЯ ПРОВЕРКА

@@ -16,7 +16,7 @@ Example:
 /speedadd fast FastTest https://speed.example/test.bin 8 30
 ```
 
-The endpoint must be a direct HTTPS download on port 443, without redirects or credentials, and resolve only to public IP addresses. Connect timeout is 1-60 seconds; maximum test time is 1-120 seconds. User-added profiles are stored in the bot SQLite state database and appear in `/speed`. Measurements always use the current tunnel interface; the endpoint's country is independent of the selected VPN location.
+The endpoint must be a direct HTTPS download on port 443, without redirects or credentials, and resolve only to public IP addresses including at least one IPv4 address. Connect timeout is 1-60 seconds; maximum test time is 1-120 seconds. User-added profiles are stored in the bot SQLite state database and appear in `/speed`. Measurements always use the current tunnel interface; the endpoint's country is independent of the selected VPN location.
 
 By default, every `TG_ALLOWED_CHAT_IDS` entry is also an administrator. To use a smaller admin set, define `TG_ADMIN_CHAT_IDS` as a comma-separated subset of `TG_ALLOWED_CHAT_IDS` in `/etc/vpngw-bot.env`.
 
@@ -30,7 +30,7 @@ From the deployed checkout on the Pi:
 sudo /home/pi/app/vpngw/tools/pi-bot-deploy-commands.sh
 ```
 
-The script installs the Python systemd unit, helper scripts, sudoers allowlist, runtime directory and SQLite permissions, then restarts `vpngw-bot.service`. It does not change the VPN location. The service runs as `vpngw-bot`; only the switch helper runs as root.
+The script installs and enables the Python systemd unit, helper scripts, sudoers allowlist, runtime directory and SQLite permissions, then restarts `vpngw-bot.service`. It does not change the VPN location. The service runs as `vpngw-bot`; only the switch helper runs as root.
 
 ## Operations
 

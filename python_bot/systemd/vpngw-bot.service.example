@@ -5,16 +5,14 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=vpngw
-WorkingDirectory=/opt/vpngw-python
-Environment=TG_TOKEN=
-Environment=TG_ALLOWED_CHAT_IDS=123456789
-ExecStart=/opt/vpngw-python/.venv/bin/python /opt/vpngw-python/src/vpngw_bot/service.py
+User=vpngw-bot
+Group=vpngw-bot
+WorkingDirectory=/home/pi/app/vpngw
+EnvironmentFile=/etc/vpngw-bot.env
+ExecStart=/home/pi/.venv/bin/python -m vpngw_bot
 Restart=on-failure
 RestartSec=10
-NoNewPrivileges=true
-ProtectSystem=strict
-ProtectHome=true
+NoNewPrivileges=false
 ReadWritePaths=/var/lib/vpngw /tmp
 
 [Install]

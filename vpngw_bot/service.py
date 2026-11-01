@@ -129,6 +129,7 @@ class VpnBotService:
                 connect_timeout_raw,
                 max_time_raw,
             )
+            await asyncio.to_thread(self.adapter.verify_custom_speed_endpoint, profile["url"])
             existing_ids = {item["id"] for item in self.adapter.speed_options()}
             existing_ids.update(item["id"] for item in self.state.list_speed_profiles())
             if profile["id"] in existing_ids:

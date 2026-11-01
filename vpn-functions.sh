@@ -200,11 +200,15 @@ get_vpn_download_speed() {
     if [ -n "$resolve_host" ] && [ -n "$resolve_ip" ]; then
         curl_args+=(--resolve "$resolve_host:443:$resolve_ip")
     fi
-    local speed_bytes
-    speed_bytes=$(curl "${curl_args[@]}" "$test_url" -o /dev/null -w "%{speed_download}")
+    local speed_result speed_bytes http_code curl_status
+    speed_result=$(curl "${curl_args[@]}" "$test_url" -o /dev/null -w "%{speed_download}|%{http_code}")
+    curl_status=$?
+    speed_bytes="${speed_result%|*}"
+    http_code="${speed_result##*|}"
 
-    # Если curl завершился с ошибкой или вернул 0
-    if [ $? -ne 0 ] || [ -z "$speed_bytes" ] || [ "${speed_bytes%.*}" -eq 0 ]; then
+    # Redirect/error responses are not valid download measurements.
+    if [ "$curl_status" -ne 0 ] || [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]] ||
+        [ -z "$speed_bytes" ] || [ "${speed_bytes%.*}" -eq 0 ]; then
         echo "0"
         return 1
     fi

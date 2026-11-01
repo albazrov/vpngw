@@ -33,11 +33,20 @@ visudo -cf /etc/sudoers.d/vpngw-bot
 
 install -d -o root -g root -m 0700 /etc/vpngw
 install -d -o root -g root -m 0700 /dev/shm/vpn_stats
+existing_allowed_ids=""
+existing_admin_ids=""
+if [[ -f /etc/vpngw-bot.env ]]; then
+  existing_allowed_ids=$(sed -n 's/^TG_ALLOWED_CHAT_IDS="\([^"]*\)"$/\1/p' /etc/vpngw-bot.env)
+  existing_admin_ids=$(sed -n 's/^TG_ADMIN_CHAT_IDS="\([^"]*\)"$/\1/p' /etc/vpngw-bot.env)
+fi
+allowed_chat_ids="${TG_ALLOWED_CHAT_IDS:-${existing_allowed_ids:-123456789}}"
+admin_chat_ids="${TG_ADMIN_CHAT_IDS:-${existing_admin_ids:-$allowed_chat_ids}}"
 if [[ -n "${TG_TOKEN:-}" ]]; then
   install -o root -g vpngw-bot -m 0640 /dev/null /etc/vpngw-bot.env
   cat > /etc/vpngw-bot.env <<EOF
 TG_TOKEN="${TG_TOKEN}"
-TG_ALLOWED_CHAT_IDS="${TG_ALLOWED_CHAT_IDS:-123456789}"
+TG_ALLOWED_CHAT_IDS="${allowed_chat_ids}"
+TG_ADMIN_CHAT_IDS="${admin_chat_ids}"
 VPNGW_CONFIG="/etc/vpngw-bot.conf"
 VPNGW_FUNCTIONS="/usr/local/bin/vpngw/vpn-functions.sh"
 VPNGW_SPEED_CONFIG="/etc/vpngw-speed-tests.conf"
@@ -79,6 +88,7 @@ done
 
 install -o root -g root -m 0644 /home/pi/app/vpngw/python_bot/systemd/vpngw-bot.service /etc/systemd/system/vpngw-bot.service
 systemctl daemon-reload
+systemctl enable vpngw-bot.service
 systemctl stop vpngw-bot.service 2>/dev/null || true
 systemctl restart vpngw-bot.service
 systemctl status vpngw-bot.service --no-pager -l --lines=25
