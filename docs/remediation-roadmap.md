@@ -1,6 +1,8 @@
 # План устранения проблем и развития Telegram-управления
 
-План составлен по [реестру проблем](security-and-bug-findings.md) и статическому анализу исходников. Целевая архитектура гибридная: Bash сохраняется для коротких системных операций, а Telegram API, очередь и долговременное состояние постепенно переносятся в отдельный непривилегированный Python-сервис. Это поэтапная миграция, не полная перепись recovery/routing.
+> Исторический backlog, составленный до текущего Python-релиза. Он не является инструкцией по миграции или запуску двух ботов. Поддерживаемый Telegram runtime — Python `vpngw-bot.service`; старый shell Telegram bot не поддерживается и не является вариантом rollback. Текущие инструкции: [Python README](../python_bot/README.md) и [production runbook](runbooks/python-bot-production.md).
+
+Пункты ниже сохраняют контекст аудита системных Bash-компонентов и возможных будущих улучшений. Выполненные возможности сверять с исходниками и текущим runbook, а не считать все пункты открытыми задачами.
 
 ## Правила выполнения задач
 
@@ -46,20 +48,18 @@
 - Статус: [ ] PR/коммит: ____ Проверки: ____
 - **Промт агенту:** «Исправь проверку результата переключения: проверь exit code CLI, connectivity и соответствие фактической локации запрошенной. Добавь тесты успеха, ошибки CLI и несовпадения локации; не делай иных рефакторингов.»
 
-### 0.3 Создавать runtime-каталоги до первой записи лога
+### 0.3 Создавать runtime-каталоги до запуска root scripts
 
 - Связь: F-13.
-- Задача: выяснить пользователя `vpn-tg-bot.service` и владельцев shared paths; обеспечить создание `/dev/shm/vpn_stats` и других нужных runtime dirs до startup logging. Учесть совместный доступ systemd bot и root cron; не применять `chmod 777`.
-- Готово, когда: после удаления runtime directories и cold start/reboot bot не пишет `No such file or directory`; bot и cron имеют только необходимые права; логи доступны.
-- Статус: [ ] Unit/user/mode inventory: ____ PR/коммит: ____ Cold-start test: ____
-- **Промт агенту:** «Исправь старт Telegram-бота при пустом `/dev/shm`: выясни service user и shared ownership, создай нужные runtime paths до первого `log_message`, не используй `chmod 777`. Добавь тест старта без каталога и опиши cold-start/rollback в runbook.»
-- Прогресс: bot/runtime readers now fail closed unless stats dir is root-owned mode 0700; production tmpfiles installation and cold-start validation remain.
+- Текущее решение: Python bot логирует в systemd journal и не использует `vpn-live.log`. Deploy устанавливает `/etc/tmpfiles.d/vpngw.conf` для root cron/recovery scripts.
+- Осталось проверить: cold boot/reboot создаёт `/dev/shm/vpn_stats` с `root:root 0700` до первого root-script запуска.
+- Статус: runtime rule установлено; cold-boot test pending.
 
 ### 0.4 Запретить `pi` изменять код, исполняемый root
 
 - Связь: F-14; подтверждено production inventory.
 - Задача: инвентаризировать владельца/mode `/usr/local/bin/vpngw`, каждого root-cron script, bot entrypoint и sourced library. Перевести production code и parent directories в root-owned, non-writable для `pi` (обычно directories `root:root 755`, scripts `root:root 755` или более строгий executable mode); ограничить обновление через reviewed privileged deployment. Не менять ownership всего дерева до выявления data/cache файлов и consumers.
-- Готово, когда: `pi` не может изменять файлы, исполняемые root; root crontab и `vpn-tg-bot.service` продолжают работать; deploy/rollback сохраняет root ownership.
+- Готово, когда: `pi` не может изменять файлы, исполняемые root; root crontab и `vpngw-bot.service` продолжают работать; deploy сохраняет root ownership. Сам Python bot работает как `vpngw-bot`.
 - Runbook: до production-изменения создать `docs/runbooks/0.4-root-owned-code.md` с inventory, backup, проверкой прав и rollback.
 - Статус: [ ] Inventory complete: ____ PR/коммит: ____ Permission test: ____ Rollback: ____
 - **Промт агенту:** «Закрой риск F-14: проверь владельцев и права всех root-executed scripts, source libraries и parent directories. Сделай production code root-owned/non-writable для `pi`, не меняя ownership cache/config/data без обоснования. Добавь тест effective write access, systemd/cron smoke и task runbook deploy/rollback.»
@@ -67,12 +67,9 @@
 ### 0.5 Ужесточить права `/dev/shm/vpn_stats`
 
 - Связь: F-15; collector зафиксировал mode `777`.
-- Задача: проверить consumers/создание каталога из `vpn-bypass-update.sh`, `vpn-functions.sh`, bot и root cron; установить `deploy/vpngw-tmpfiles.conf.example` в `/etc/tmpfiles.d/vpngw.conf` и применить через `systemd-tmpfiles --create`. Текущие consumers работают root, ожидаемый mode `0700 root:root`; если бот переедет на отдельного пользователя — выделить ему отдельные RuntimeDirectory/Group paths. Скрипты должны fail closed при неверных владельце/mode.
+- Задача: consumers каталога — root `vpn-bypass-update.sh`, `vpn-functions.sh` и root cron; Python bot с ним не работает. Deploy устанавливает `deploy/vpngw-tmpfiles.conf.example` в `/etc/tmpfiles.d/vpngw.conf`. Ожидаемый mode — `0700 root:root`; скрипты fail closed при неверных владельце/mode.
 - Готово, когда: cold boot создаёт каталог с нужным owner/mode до первого log; bot/cron сохраняют работоспособность; непривилегированный user не может изменять offset/auth flags/counters/logs; permission/cold-start regression tests проходят в CI.
-- Runbook: до выкладки создать `docs/runbooks/0.5-runtime-dir-permissions.md` с backup/restore state, rollout и тестом на reboot.
-- Статус: [ ] Consumers inventoried: ____ PR/коммит: ____ Mode/cold-start test: ____ Rollback: ____
-- **Промт агенту:** «Исправь F-15: инвентаризируй все consumers `/dev/shm/vpn_stats`, установи минимальные совместимые owner/mode и инициализируй каталог до первого log write. Не используй `chmod 777`. Покрой cold-start, root cron и отказ записи от unprivileged user; добавь deployment/rollback runbook.»
-- Прогресс: `ensure_stats_dir`, permission regression test и tmpfiles example готовы; production rule deployment/validation pending.
+- Статус: tmpfiles rule установлено, каталог проверен `root:root 0700` 2026-11-01; cold-start/cron test pending.
 
 ## Этап 1. Ограничить команды и доступ
 
@@ -146,13 +143,13 @@
 - Статус: [ ] PR/коммит: ____ Проверки: ____
 - **Промт агенту:** «Добавь durable очередь и последовательный worker в Python manager; polling не должен блокироваться. Вызывай только контракт из 2.1, показывай job status, покрой restart/replay/timeout и не добавляй новые привилегированные операции.»
 
-### 2.5 Перенести Telegram-бота на Python поэтапно
+### 2.5 Python bot release baseline (implemented)
 
-- Связь: A-01; зависит от 1.2, 1.3, 2.1, 2.3 и 2.4.
-- Задача: создать отдельный Python package/service для Telegram handlers, user/chat authorization, меню и статуса задач. Выбрать поддерживаемую Telegram-библиотеку, зафиксировать версии зависимостей, тестировать без настоящего bot token. Сначала перенести `/start`, `/menu`, `/status`; затем смену локации и остальные действия через manager contract. Старый shell bot выключать только после parity test и готового возврата.
-- Готово, когда: сервис работает отдельным системным пользователем без root; unit tests покрывают команды и отказ доступа; end-to-end fake API tests подтверждают parity; нет shell-string execution; при rollback можно вернуть предыдущую версию бота и сохранить совместимое состояние.
-- Статус: [ ] PR/коммит: ____ Unit tests: ____ Parity test: ____ Rollback test: ____
-- **Промт агенту:** «Создай Python Telegram service для первого набора `/start`, `/menu`, `/status` с разрешённым user/chat ID, pinned dependencies и unit tests без реального токена. Запускай без root; не выполняй системные команды. Не удаляй shell-бот до отдельного parity/rollback этапа.»
+- Поддерживаемый runtime: `vpngw-bot.service`, Python `python-telegram-bot`, service user `vpngw-bot`.
+- Реализованы `/start`, `/menu`, `/status`, `/speed`, admin-only `/speedadd`, кнопки переключения `RO`/`DE`/`FI`, SQLite state и безопасный allowlist root-helper.
+- Долгие status/speed/connect действия выполняются вне event loop; пользователь видит сообщение о процессе и результат.
+- Старый shell Telegram bot не используется как параллельный consumer, миграционный этап или rollback. Bash scripts остаются только системными VPN/routing/recovery helpers.
+- Проверки и эксплуатация описаны в [Python production runbook](runbooks/python-bot-production.md); актуальный кодовый контракт — в [Python README](../python_bot/README.md).
 
 ## Этап 3. Сохранить корректность сетевой диагностики и IP-базы
 
@@ -182,23 +179,22 @@
 - Статус: [ ] PR/коммит: ____ Проверки: ____
 - **Промт агенту:** «Ограничь recovery-подключения в `adguardvpn-starter.sh`: лимит на запуск, общий cooldown/backoff между повторами и timeout на все вызовы CLI, включая auth retry. Счётчик хранить атомарно и защищать lock; сбрасывать только после проверенного восстановления. Добавь тест многократных запусков с fake CLI; не меняй список локаций.»
 
-## Этап 4. Реализовать управление через Telegram поверх общего интерфейса
+## Этап 4. Возможные расширения Python-бота
 
-**Приоритет: P2.** Начинать после этапов 1 и 2. Все операции должны идти через общий интерфейс и очередь, а права соответствовать матрице из 1.3.
+Это backlog дополнительных функций, не требования для текущего релиза. Уже доступны `/start`, `/menu`, `/status`, `/speed`, admin `/speedadd` и фиксированное переключение `RO`/`DE`/`FI`. Новые возможности добавлять непосредственно в Python service через существующий adapter; старый shell Telegram bot и миграционный parity не используются.
 
-### 4.1 Расширить сводку состояния
+### 4.1 Расширить системную сводку состояния
 
-- Задача: отображать WAN, VPN-интерфейс/connectivity, фактическую локацию, состояние маршрутизации/IP-набора, температуру, диск, uptime и статус текущей задачи; недоступные показатели явно помечать как неизвестные.
-- Готово, когда: статус не блокирует polling и отличает «не проверено/ошибка» от «исправно».
-- Статус: [ ] PR/коммит: ____ Проверки: ____
+- Текущее поведение: `/status` показывает GeoIP city/country через активный туннель и измеренную скорость выбранного default профиля; длительный adapter вызов идёт в отдельном потоке и сообщает пользователю о ходе проверки.
+- Возможное расширение: WAN, routing/IP-set, температуру, диск, uptime и доступность этих источников. Не выдавать непроверенные показатели за исправные.
+- Статус: базовый status реализован; системные показатели не входят в текущий релиз.
 - **Промт агенту:** «Расширь Telegram status сведениями о WAN, VPN, локации, IP-базе, температуре, диске и активной задаче. Не показывай неизвестное значение как исправное; покрой недоступные проверки тестами.»
 
-### 4.2 Добавить просмотр списка локаций и безопасное переключение
+### 4.2 Расширить список поддерживаемых VPN-локаций
 
-- Задача: получить список из валидированного кэша, дать пользователю выбрать локацию и запускать существующий проверенный сценарий переключения.
-- Готово, когда: устаревший/пустой кэш обрабатывается явно; неизвестная локация не принимается; результат подтверждается фактической проверкой.
-- Статус: [ ] PR/коммит: ____ Проверки: ____
-- **Промт агенту:** «Добавь Telegram-команду/меню списка разрешённых локаций и переключение через общий интерфейс задач. Используй уже существующие проверки доступа и результата; не дублируй логику подключения.»
+- Текущее поведение: меню и root-helper поддерживают только `RO`, `DE`, `FI`; неизвестные значения отклоняются.
+- Возможное расширение: динамический список локаций только после добавления серверной allowlist и обновления точного sudoers contract. Не принимать произвольную локацию из Telegram.
+- Статус: фиксированный список реализован; динамические локации не входят в текущий релиз.
 
 ### 4.3 Добавить восстановление и обновление инфраструктурных данных
 
@@ -305,13 +301,13 @@
 
 1. Этап 0: F-01 и F-02.
 2. Этап 1: авторизация, allowlist и матрица операций.
-3. Этап 2: контракт shell adapter, общий lock, затем Python update storage/worker и постепенный перенос Telegram handlers.
+3. Этап 2: поддерживать фиксированный adapter contract и сериализацию конфликтующих VPN changes; Python Telegram service уже является текущим runtime, не этапом переноса.
 4. Этап 3: безопасная IP-база и ограниченные connectivity-проверки.
 5. Этап 5.1: реальные автоматические тесты обязательны до широкого расширения команд.
-6. Этап 2.5: Python bot parity на test перед отключением shell bot; этап 4 реализуется поверх целевого Python service/общего adapter.
+6. Этап 2.5 завершён для текущего набора команд; дальнейшие Telegram-функции добавляются непосредственно в Python service через фиксированный adapter contract, без shell-bot parity или parallel polling.
 7. Для R-01 выполнить 4.7 до кода probe, затем 4.8 → 4.9 → 4.10; не допускать probe к основному туннелю до доказательства изоляции.
 8. Этап 4.6 и 5.2: настройка/проверка запуска только с данными реального устройства, затем staged rollout.
-9. Этапы 5.3 → 5.4 обязательны до первой Raspberry Pi test deployment; 5.5 — до promotion в `main` и `/usr/local/bin/vpngw/`.
+9. Этапы 5.3 → 5.5 относятся к отдельному test/prod release process; они не предполагают запуск legacy shell bot или миграционную схему.
 
 ## Definition of Done для каждого PR
 

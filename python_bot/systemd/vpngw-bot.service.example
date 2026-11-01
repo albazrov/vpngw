@@ -1,0 +1,21 @@
+[Unit]
+Description=VPN Gateway Python Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=vpngw
+WorkingDirectory=/opt/vpngw-python
+Environment=TG_TOKEN=
+Environment=TG_ALLOWED_CHAT_IDS=123456789
+ExecStart=/opt/vpngw-python/.venv/bin/python /opt/vpngw-python/src/vpngw_bot/service.py
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/vpngw /tmp
+
+[Install]
+WantedBy=multi-user.target

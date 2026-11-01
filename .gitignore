@@ -3,10 +3,16 @@
 *.env
 config.sh
 
+# Python bytecode and test caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
 # Исключить файлы логов и отчетов
 *.log
 *.txt
 reports/
+!python_bot/requirements.txt
 
 # Локальные снимки production inventory содержат топологию и состояние системы
 docs/vpngw-production-inventory-update*.md

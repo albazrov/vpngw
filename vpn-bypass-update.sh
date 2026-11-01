@@ -17,7 +17,7 @@ else
 fi
 
 # Динамически подключаем библиотеку функций, используя переменную пути из конфига
-FUNCTIONS_LIB="$MAIN_SH_DIR/vpn-functions.sh"
+FUNCTIONS_LIB="${VPNGW_FUNCTIONS:-$MAIN_SH_DIR/vpn-functions.sh}"
 if [ -f "$FUNCTIONS_LIB" ]; then
     source "$FUNCTIONS_LIB"
 else
@@ -196,7 +196,6 @@ update_ips() {
 
 
 # --- ИСПОЛНЕНИЕ ---
-rotate_logs
 setup_infrastructure
 
 # Если вызван с параметром 'force' или список пуст — обновляем базу

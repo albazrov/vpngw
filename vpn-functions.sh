@@ -20,6 +20,19 @@ run_adguard_connect() {
         return 127
     fi
 
+    if [ "$(id -u)" -ne 0 ] && [ -n "${VPNGW_SWITCH_BIN:-}" ]; then
+        if ! command -v "$VPNGW_SWITCH_BIN" >/dev/null 2>&1 || ! command -v sudo >/dev/null 2>&1; then
+            return 127
+        fi
+        sudo -n -- "$VPNGW_SWITCH_BIN" "$location"
+        return $?
+    fi
+
+    if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+        sudo -n -- "$ADG_BIN" connect -l "$location" >/dev/null 2>&1
+        return $?
+    fi
+
     "$ADG_BIN" connect -l "$location" >/dev/null 2>&1
 }
 
@@ -97,8 +110,44 @@ check_vpn_connectivity() {
 
 # ПРОВЕРКА СКОРОСТИ КАНАЛА 
 
+list_vpn_speed_tests() {
+    local config_file="${VPNGW_SPEED_CONFIG:-$(dirname -- "${BASH_SOURCE[0]}")/vpn-speed-tests.conf}"
+    local -a VPN_SPEED_TEST_IDS=()
+    local -A VPN_SPEED_TEST_NAMES=()
+    local -A VPN_SPEED_TEST_URLS=()
+    local -A VPN_SPEED_TEST_CONNECT_TIMEOUT=()
+    local -A VPN_SPEED_TEST_MAX_TIME=()
+
+    if [ ! -r "$config_file" ]; then
+        echo "Speed test config is not readable: $config_file" >&2
+        return 1
+    fi
+    source "$config_file"
+
+    local profile profile_url connect_timeout max_time
+    for profile in "${VPN_SPEED_TEST_IDS[@]}"; do
+        profile_url="${VPN_SPEED_TEST_URLS[$profile]:-}"
+        connect_timeout="${VPN_SPEED_TEST_CONNECT_TIMEOUT[$profile]:-6}"
+        max_time="${VPN_SPEED_TEST_MAX_TIME[$profile]:-20}"
+        if [[ "$profile" =~ ^[a-zA-Z0-9_-]+$ ]] &&
+            [ -n "${VPN_SPEED_TEST_NAMES[$profile]:-}" ] &&
+            [[ "$profile_url" == https://* ]] &&
+            [[ "$connect_timeout" =~ ^[1-9][0-9]?$ ]] &&
+            [[ "$max_time" =~ ^[1-9][0-9]{0,2}$ ]] &&
+            (( connect_timeout <= 60 && max_time <= 120 )); then
+            printf '%s|%s\n' "$profile" "${VPN_SPEED_TEST_NAMES[$profile]}"
+        fi
+    done
+}
+
 get_vpn_download_speed() {
     local interface="$1"
+    local profile="${2:-}"
+    local override_url="${3:-}"
+    local override_connect_timeout="${4:-}"
+    local override_max_time="${5:-}"
+    local resolve_host="${6:-}"
+    local resolve_ip="${7:-}"
     
     # 1. Защита от пустого интерфейса
     if [ -z "$interface" ]; then
@@ -106,18 +155,53 @@ get_vpn_download_speed() {
         return 2
     fi
 
-    # 2. Ссылка на тестовый файл (используем стабильный CDN от Cloudflare/Yandex)
-    # Файл размером 10-20 МБ оптимален, чтобы замер был точным и не забивал канал надолго
-    local test_url="http://speedtest.tele2.net/5MB.zip" 
+    local test_url connect_timeout max_time
+    if [ -n "$override_url" ]; then
+        test_url="$override_url"
+        connect_timeout="$override_connect_timeout"
+        max_time="$override_max_time"
+    else
+        local config_file="${VPNGW_SPEED_CONFIG:-$(dirname -- "${BASH_SOURCE[0]}")/vpn-speed-tests.conf}"
+        local -a VPN_SPEED_TEST_IDS=()
+        local -A VPN_SPEED_TEST_NAMES=()
+        local -A VPN_SPEED_TEST_URLS=()
+        local -A VPN_SPEED_TEST_CONNECT_TIMEOUT=()
+        local -A VPN_SPEED_TEST_MAX_TIME=()
+
+        if [ ! -r "$config_file" ]; then
+            echo "0"
+            return 1
+        fi
+        source "$config_file"
+
+        if [ -z "$profile" ]; then
+            profile="${VPN_SPEED_TEST_IDS[0]:-}"
+        fi
+        if [[ ! "$profile" =~ ^[a-zA-Z0-9_-]+$ ]] || [ -z "${VPN_SPEED_TEST_URLS[$profile]:-}" ]; then
+            echo "0"
+            return 1
+        fi
+
+        test_url="${VPN_SPEED_TEST_URLS[$profile]}"
+        connect_timeout="${VPN_SPEED_TEST_CONNECT_TIMEOUT[$profile]:-6}"
+        max_time="${VPN_SPEED_TEST_MAX_TIME[$profile]:-20}"
+    fi
+    if [[ "$test_url" != https://* ]] || [[ ! "$connect_timeout" =~ ^[1-9][0-9]?$ ]] ||
+        [[ ! "$max_time" =~ ^[1-9][0-9]{0,2}$ ]] || (( connect_timeout > 60 || max_time > 120 )); then
+        echo "0"
+        return 1
+    fi
 
     # 3. Делаем замер скорости через curl
     # -w "%{speed_download}" возвращает среднюю скорость в байтах в секунду
-    # -m 20 ограничивает максимальное время теста 20 секундами (на случай медленного линка)
-    # -k игнорировать проблемы SSL
-    # -4 принудительно IPv4, -s-S скроет прогресс-бар но покажет ошибки сети
+    # Таймауты и URL берутся из отдельного root-owned конфигурационного файла
 
+    local -a curl_args=(-s -S -4 --proto '=https' --interface "$interface" --connect-timeout "$connect_timeout" --max-time "$max_time")
+    if [ -n "$resolve_host" ] && [ -n "$resolve_ip" ]; then
+        curl_args+=(--resolve "$resolve_host:443:$resolve_ip")
+    fi
     local speed_bytes
-    speed_bytes=$(curl -s -S -4 -k -L --interface "$interface" --connect-timeout 6 -m 20 "$test_url" -o /dev/null -w "%{speed_download}")
+    speed_bytes=$(curl "${curl_args[@]}" "$test_url" -o /dev/null -w "%{speed_download}")
 
     # Если curl завершился с ошибкой или вернул 0
     if [ $? -ne 0 ] || [ -z "$speed_bytes" ] || [ "${speed_bytes%.*}" -eq 0 ]; then
@@ -139,6 +223,7 @@ get_vpn_download_speed() {
 
 check_geo() {
     local interface="$1"
+    local detail="${2:-}"
     
     # Защита от пустого интерфейса
     if [ -z "$interface" ]; then
@@ -147,15 +232,21 @@ check_geo() {
 
     # Выполняем запрос через указанный интерфейс
     local geo_raw
-    geo_raw=$(timeout 15s curl -sL --interface "$interface" "http://ip-api.com/line/?fields=status,countryCode,query" | tr -d '\r')
+    geo_raw=$(timeout 15s curl -sL --interface "$interface" "http://ip-api.com/line/?fields=status,countryCode,city,query" | tr -d '\r')
     
     local g_status
     g_status=$(echo "$geo_raw" | sed -n '1p')
     local g_country
     g_country=$(echo "$geo_raw" | sed -n '2p' | tr '[:lower:]' '[:upper:]')
+    local g_city
+    g_city=$(echo "$geo_raw" | sed -n '3p')
 
     if [ "$g_status" = "success" ] && [ -n "$g_country" ]; then
-        echo "$g_country"
+        if [ "$detail" = "detail" ] && [ -n "$g_city" ]; then
+            printf '%s|%s\n' "$g_country" "$g_city"
+        else
+            echo "$g_country"
+        fi
         return 0
     fi
     
