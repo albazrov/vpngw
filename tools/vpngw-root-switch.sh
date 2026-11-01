@@ -16,6 +16,7 @@ if [[ ! -r "$config_file" ]]; then
     echo "Missing bot config: $config_file" >&2
     exit 1
 fi
+# shellcheck disable=SC1090
 . "$config_file"
 
 if [[ -z "${VPN_IF:-}" || ! "$VPN_IF" =~ ^[[:alnum:]_.-]+$ ]]; then
@@ -39,6 +40,7 @@ fi
 "$adguard_bin" connect -l "$location"
 VPNGW_FUNCTIONS="$functions_file" "$bypass_script" 8>&-
 sleep 5
+# shellcheck disable=SC1090
 . "$functions_file"
 if ! check_vpn_connectivity "$VPN_IF"; then
     echo "VPN connectivity check failed on $VPN_IF" >&2
