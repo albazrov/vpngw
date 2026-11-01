@@ -122,6 +122,7 @@ list_vpn_speed_tests() {
         echo "Speed test config is not readable: $config_file" >&2
         return 1
     fi
+    # shellcheck disable=SC1090
     source "$config_file"
 
     local profile profile_url connect_timeout max_time
@@ -172,6 +173,7 @@ get_vpn_download_speed() {
             echo "0"
             return 1
         fi
+        # shellcheck disable=SC1090
         source "$config_file"
 
         if [ -z "$profile" ]; then
@@ -285,7 +287,8 @@ log_message() {
 inc_stat() {
     local file="$STATS_DIR/$1"
     ensure_stats_dir || return $?
-    local val=$(cat "$file" 2>/dev/null || echo 0)
+    local val
+    val=$(cat "$file" 2>/dev/null || echo 0)
     echo $((val + 1)) > "$file"
 }
 
@@ -306,7 +309,8 @@ check_state_change() {
     local alert_msg_fail="$4"
     local state_file="$STATS_DIR/last_$state_name"
     
-    local old_val=$(cat "$state_file" 2>/dev/null || echo 1)
+    local old_val
+    old_val=$(cat "$state_file" 2>/dev/null || echo 1)
     
     if [[ "$old_val" == "1" && "$current_val" == "0" ]]; then
         [ -n "$alert_msg_fail" ] && send_alert "CRITICAL" "$alert_msg_fail"
@@ -330,7 +334,8 @@ send_tg() {
 
 check_hw_health() {
     local tag="${1:-SYSTEM}"
-    local cpu_temp=$("$MAIN_SH_DIR/vpn-hw-check.sh")
+    local cpu_temp
+    cpu_temp=$("$MAIN_SH_DIR/vpn-hw-check.sh")
     local limit=${TEMP_LIMIT:-75}
 
     # Если температура 0 или пустая — значит ошибка чтения
@@ -346,11 +351,12 @@ check_hw_health() {
 check_temp_health() {
     # 1. Получаем температуру и очищаем от всего, кроме цифр
     
-    local cpu_temp=$("$MAIN_SH_DIR/vpn-hw-check.sh")
+    local cpu_temp
+    cpu_temp=$("$MAIN_SH_DIR/vpn-hw-check.sh")
     
     # 2. Берем лимит из конфига или ставим 75 по умолчанию
     local limit=${TEMP_LIMIT:-75}
-    debug_log "[DEBUG] Raw Temp: $raw_temp | Parsed: $cpu_temp | Limit: $limit"
+    debug_log "[DEBUG] CPU temp: $cpu_temp | Limit: $limit"
 
     # 3. Проверка на валидность данных перед сравнением
     if [[ -z "$cpu_temp" || ! "$cpu_temp" =~ ^[0-9]+$ ]]; then
