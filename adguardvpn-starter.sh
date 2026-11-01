@@ -36,8 +36,6 @@ TIMEOUT_CMD="timeout 40s"
 # функция log_message определена в "/etc/vpn-gw.conf"
 debug_log() { $DEBUG && log_message "DEBUG: $1" "STARTER"; }
 
-clean_output() { echo "$1" | sed 's/\x1b\[[0-9;]*m//g' | tr -d '\r'; }
-
 # --- БЛОКИРОВКА ---
 exec 8>"$LOCK_FILE"
 if ! flock -n 8; then
@@ -46,7 +44,6 @@ if ! flock -n 8; then
 fi
 
 # --- ОТПРАВКА СООБЩЕНИЙ  ---
-# shellcheck disable=SC2329
 send_alert() {
     local mode="$1"    # Режим: "CRITICAL" (падение) или "OK" (восстановление)
     local message="$2" # Текст сообщения для Telegram (с Markdown-звездочками)
@@ -200,7 +197,8 @@ try_connect_queue() {
         debug_log "Mode: RECOVERY. Connecting to $LOC (Attempt: $attempt_info)..."
                 
         # 2. Выполняем подключение и сохраняем ответ для анализа
-        local conn_res=$($TIMEOUT_CMD /opt/adguardvpn_cli/adguardvpn-cli connect -l "$LOC" 2>&1 8>&-)
+        local conn_res
+        conn_res=$($TIMEOUT_CMD /opt/adguardvpn_cli/adguardvpn-cli connect -l "$LOC" 2>&1 8>&-)
         
         # 3. Проверка необходимости авторизации (вызов внешнего хелпера)
         if echo "$conn_res" | grep -qiE "log in|authorize|account|limit"; then
