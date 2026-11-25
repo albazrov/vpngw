@@ -28,6 +28,7 @@ fi
 
 # Локальные технические настройки
 DEBUG=true
+STARTER_LOCK_FILE="/dev/shm/adguardvpn-starter.lock"
 TIMEOUT_CMD="timeout 40s"
 
 # --- ВНУТРЕННИЕ ФУНКЦИИ ---
@@ -36,8 +37,9 @@ TIMEOUT_CMD="timeout 40s"
 debug_log() { $DEBUG && log_message "DEBUG: $1" "STARTER"; }
 
 # --- БЛОКИРОВКА ---
-if ! acquire_vpn_switch_lock; then
-    debug_log "Process already running. Lock file active."
+exec 9>"$STARTER_LOCK_FILE"
+if ! flock -n 9; then
+    debug_log "Process already running. Starter lock active."
     exit 0
 fi
 
@@ -177,12 +179,22 @@ try_connect_queue() {
         local auth_status=$?
         
         if [ $auth_status -eq 0 ]; then
-             log_msg "Auth just restored! Proceeding to connect..."
+             debug_log "Auth just restored! Proceeding to connect..."
              # Здесь продолжаем выполнение к циклу ниже
         else
              # Если все еще ждем (2) или ошибка (1) — выходим из всего стартера
              exit 0 
         fi
+    fi
+
+    local lock_status=0
+    acquire_vpn_switch_lock || lock_status=$?
+    if [[ "$lock_status" -eq 75 ]]; then
+        debug_log "VPN switch is busy; deferring automatic recovery to the next run."
+        return 75
+    elif [[ "$lock_status" -ne 0 ]]; then
+        printf 'Unable to acquire VPN switch lock (status %d)\n' "$lock_status" >&2
+        return "$lock_status"
     fi
 
     # Восстанавливаем счетчик попыток из RAM, если это повторный запуск (после обновления кэша)
@@ -207,13 +219,17 @@ try_connect_queue() {
             local auth_status=$?
             
             if [ $auth_status -eq 0 ]; then
-                log_msg "Auth just restored! Retrying connect to $LOC..."
+                debug_log "Auth just restored! Retrying connect to $LOC..."
                 # Повторяем коннект, так как теперь мы авторизованы
-                /opt/adguardvpn_cli/adguardvpn-cli connect -l "$LOC" > /dev/null 2>&1 8>&-
+                $TIMEOUT_CMD /opt/adguardvpn_cli/adguardvpn-cli connect -l "$LOC" > /dev/null 2>&1 8>&-
                 sleep 20
                 if check_internet; then
                     # Если успех - формируем отчет и выходим (как при обычном успехе)
                     ACTUAL_ISO=$(check_geo)
+                    if [[ "$ACTUAL_ISO" != "$LOC" ]]; then
+                        debug_log "Connected traffic is in $ACTUAL_ISO, expected $LOC. Retrying."
+                        continue
+                    fi
                     inc_stat "cnt_success"
                     debug_log "System is ${CLR_GRN}healthy${CLR_RST}. ISO: [$ACTUAL_ISO]"
                     return 0
@@ -235,6 +251,11 @@ try_connect_queue() {
         
         # 5. Проверка результата
         if check_internet; then
+            ACTUAL_ISO=$(check_geo)
+            if [[ "$ACTUAL_ISO" != "$LOC" ]]; then
+                debug_log "Connected traffic is in $ACTUAL_ISO, expected $LOC. Retrying."
+                continue
+            fi
             local end_time
             end_time=$(date '+%H:%M:%S')
             debug_log "SUCCESS: Connected to $LOC."
@@ -287,7 +308,7 @@ if check_internet; then
         "$MAIN_SH_DIR/vpn-auth-helper.sh" 8>&- 
     fi
 
-    ACTUAL_ISO=$(check_geo)
+
     if [ "$CHECK_PRIORITY" = false ]; then
         inc_stat "cnt_success"
         debug_log "System is ${CLR_GRN}healthy${CLR_RST}. ISO: [$ACTUAL_ISO]"
@@ -329,7 +350,11 @@ debug_log "${CLR_YLW}Action required. Starting RECOVERY logic${CLR_RST} at $RECO
 FINAL_QUEUE=$(build_queue "full")
 
 # Передаем время старта в функцию вторым аргументом (вместо mode_name)
-if try_connect_queue "$FINAL_QUEUE" "$RECOVERY_START_TIME"; then
+try_connect_queue "$FINAL_QUEUE" "$RECOVERY_START_TIME"
+RECOVERY_STATUS=$?
+if [[ "$RECOVERY_STATUS" -eq 0 ]]; then
+    exit 0
+elif [[ "$RECOVERY_STATUS" -eq 75 ]]; then
     exit 0
 fi
 
@@ -338,7 +363,11 @@ debug_log "${CLR_RED}Recovery failed.${CLR_RST} Updating cache from CLI..."
 # Если ничего не помогло — обновляем кэш и пробуем последний раз
 if "$MAIN_SH_DIR/vpn-loc-update.sh" 8>&- ; then
     RETRY_QUEUE=$(build_queue "full")
-    if try_connect_queue "$RETRY_QUEUE" "$RECOVERY_START_TIME"; then
+    try_connect_queue "$RETRY_QUEUE" "$RECOVERY_START_TIME"
+    RECOVERY_STATUS=$?
+    if [[ "$RECOVERY_STATUS" -eq 0 ]]; then
+        exit 0
+    elif [[ "$RECOVERY_STATUS" -eq 75 ]]; then
         exit 0
     fi
 fi

@@ -15,15 +15,6 @@ if ! systemctl is-active --quiet vpngw-bot.service; then
     echo "vpngw-bot.service is not active" >&2
     exit 1
 fi
-if systemctl is-active --quiet vpn-tg-bot.service; then
-    echo "legacy vpn-tg-bot.service is still active" >&2
-    exit 1
-fi
-if systemctl is-enabled --quiet vpn-tg-bot.service 2>/dev/null; then
-    echo "legacy vpn-tg-bot.service is still enabled" >&2
-    exit 1
-fi
-
 runtime_state=$(stat -c '%U:%G:%a' /dev/shm/vpn_stats)
 if [[ "$runtime_state" != "root:root:700" ]]; then
     echo "Unexpected runtime permissions: $runtime_state" >&2
@@ -70,6 +61,5 @@ flush_vpn_log
 echo "VPN gateway remediation deployed and verified."
 echo "The VPN location was not changed by this script."
 echo "Python bot: $(systemctl is-active vpngw-bot.service)"
-echo "Legacy bot: $(systemctl is-active vpn-tg-bot.service 2>/dev/null || true)"
 echo "Runtime: $(stat -c '%U:%G %a' /dev/shm/vpn_stats)"
 echo "Persistent log: $(stat -c '%U:%G %a %s bytes' "$LOG_DISK")"

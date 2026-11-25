@@ -31,6 +31,7 @@ acquire_vpn_switch_lock() {
 
 run_adguard_connect() {
     local location="${1:-}"
+    local connect_status
 
     if [ -z "$location" ]; then
         return 2
@@ -48,12 +49,17 @@ run_adguard_connect() {
         return $?
     fi
 
+    acquire_vpn_switch_lock || return $?
+
     if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
         sudo -n -- "$ADG_BIN" connect -l "$location" >/dev/null 2>&1
-        return $?
+        connect_status=$?
+    else
+        "$ADG_BIN" connect -l "$location" >/dev/null 2>&1
+        connect_status=$?
     fi
-
-    "$ADG_BIN" connect -l "$location" >/dev/null 2>&1
+    exec 8>&-
+    return "$connect_status"
 }
 
 telegram_api_curl() {
@@ -119,7 +125,7 @@ check_vpn_connectivity() {
 
     # Цикл проверки хостов
     for target in "${targets[@]}"; do
-        if curl -s --interface "$interface" --connect-timeout 5 "$target" >/dev/null; then
+        if curl -s --interface "$interface" --connect-timeout 5 --max-time 10 "$target" >/dev/null; then
             return 0 # Успех: хотя бы один хост ответил
         fi
     done

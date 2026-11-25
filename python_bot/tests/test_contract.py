@@ -356,7 +356,28 @@ def test_connect_contract_requires_privileged_switch_helper(tmp_path, monkeypatc
         adapter.execute("connect", {"loc": "RO"})
 
 
+def test_connect_contract_times_out_stalled_switch(monkeypatch):
+    adapter = SafeAdapter()
+    monkeypatch.setattr(
+        "vpngw_bot.adapter.subprocess.run",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            __import__("subprocess").TimeoutExpired(args[0], kwargs["timeout"])
+        ),
+    )
+
+    with pytest.raises(AdapterError, match="timed out after"):
+        adapter.execute("connect", {"loc": "DE"})
+
+
 def test_bot_policy_allows_only_expected_chat_id():
     policy = BotPolicy(allowed_chat_ids={123456789})
     assert policy.is_allowed_chat(123456789) is True
     assert policy.is_allowed_chat(42) is False
+
+
+def test_bot_config_rejects_group_chat_ids(monkeypatch):
+    monkeypatch.setenv("TG_TOKEN", "123456:dummy_token")
+    monkeypatch.setenv("TG_ALLOWED_CHAT_IDS", "-100123456789")
+
+    with pytest.raises(ValueError, match="positive private-chat IDs"):
+        BotConfig.from_env()

@@ -49,14 +49,50 @@ visudo -cf /etc/sudoers.d/vpngw-bot
 
 install -d -o root -g root -m 0700 /etc/vpngw
 install -d -o root -g root -m 0700 /dev/shm/vpn_stats
+
+read_bot_env_value() {
+  local variable="$1"
+  local value
+
+  [[ -f /etc/vpngw-bot.env ]] || return 1
+  value=$(sed -n "s/^${variable}=//p" /etc/vpngw-bot.env | tail -n 1)
+  [[ -n "$value" ]] || {
+    grep -q "^${variable}=" /etc/vpngw-bot.env || return 1
+  }
+  if [[ "$value" == \"*\" && "$value" == *\" ]]; then
+    value="${value:1:${#value}-2}"
+  elif [[ "$value" == \'*\' && "$value" == *\' ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+  printf '%s\n' "$value"
+}
+
+existing_allowed_ids_set=false
+existing_admin_ids_set=false
 existing_allowed_ids=""
 existing_admin_ids=""
 if [[ -f /etc/vpngw-bot.env ]]; then
-  existing_allowed_ids=$(sed -n 's/^TG_ALLOWED_CHAT_IDS="\([^"]*\)"$/\1/p' /etc/vpngw-bot.env)
-  existing_admin_ids=$(sed -n 's/^TG_ADMIN_CHAT_IDS="\([^"]*\)"$/\1/p' /etc/vpngw-bot.env)
+  if existing_allowed_ids=$(read_bot_env_value TG_ALLOWED_CHAT_IDS); then
+    existing_allowed_ids_set=true
+  fi
+  if existing_admin_ids=$(read_bot_env_value TG_ADMIN_CHAT_IDS); then
+    existing_admin_ids_set=true
+  fi
 fi
-allowed_chat_ids="${TG_ALLOWED_CHAT_IDS:-${existing_allowed_ids:-123456789}}"
-admin_chat_ids="${TG_ADMIN_CHAT_IDS:-${existing_admin_ids:-$allowed_chat_ids}}"
+if [[ -v TG_ALLOWED_CHAT_IDS ]]; then
+  allowed_chat_ids="$TG_ALLOWED_CHAT_IDS"
+elif [[ "$existing_allowed_ids_set" == true ]]; then
+  allowed_chat_ids="$existing_allowed_ids"
+else
+  allowed_chat_ids="123456789"
+fi
+if [[ -v TG_ADMIN_CHAT_IDS ]]; then
+  admin_chat_ids="$TG_ADMIN_CHAT_IDS"
+elif [[ "$existing_admin_ids_set" == true ]]; then
+  admin_chat_ids="$existing_admin_ids"
+else
+  admin_chat_ids="$allowed_chat_ids"
+fi
 if [[ -n "${TG_TOKEN:-}" ]]; then
   install -o root -g vpngw-bot -m 0640 /dev/null /etc/vpngw-bot.env
   cat > /etc/vpngw-bot.env <<EOF
@@ -103,7 +139,6 @@ for database in /var/lib/vpngw/bot_state.db /var/lib/vpngw/bot_queue.db; do
 done
 
 install -o root -g root -m 0644 /home/pi/app/vpngw/python_bot/systemd/vpngw-bot.service /etc/systemd/system/vpngw-bot.service
-systemctl disable --now vpn-tg-bot.service 2>/dev/null || true
 systemctl daemon-reload
 systemctl enable vpngw-bot.service
 systemctl stop vpngw-bot.service 2>/dev/null || true
@@ -111,7 +146,7 @@ systemctl restart vpngw-bot.service
 systemctl status vpngw-bot.service --no-pager -l --lines=25
 
 CRON_CURRENT=$(mktemp /tmp/vpngw-root-crontab.XXXXXX)
-CRON_UPDATED="${CRON_CURRENT}.updated"
+CRON_UPDATED=$(mktemp /tmp/vpngw-root-crontab-updated.XXXXXX)
 trap 'rm -f "$CRON_CURRENT" "$CRON_UPDATED"' EXIT
 if crontab -l > "$CRON_CURRENT" 2>/dev/null; then
   awk '
@@ -128,11 +163,6 @@ if crontab -l > "$CRON_CURRENT" 2>/dev/null; then
 fi
 rm -f "$CRON_CURRENT" "$CRON_UPDATED"
 trap - EXIT
-
-if systemctl is-active --quiet vpn-tg-bot.service; then
-  echo "Legacy vpn-tg-bot.service is still active; duplicate Telegram polling remains possible." >&2
-  exit 1
-fi
 
 printf '\n--- STATUS CHECK ---\n'
 pgrep -a -f 'python -m vpngw_bot' || true

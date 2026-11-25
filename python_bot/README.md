@@ -1,6 +1,6 @@
 # vpngw Python Telegram bot
 
-This is the supported Telegram bot for the current release. The service runs as `vpngw-bot`; privileged VPN switching is limited to the root helper and the allowlisted locations `RO`, `DE`, and `FI`. The shell scripts remain the system's VPN, routing, and recovery layer. The legacy shell Telegram bot is not supported; parallel operation, migration, and rollback to it are outside this release.
+This is the Telegram bot for the current release. The service runs as `vpngw-bot`; privileged VPN switching is limited to the root helper and the allowlisted locations `RO`, `DE`, and `FI`. Shell scripts remain the system's VPN, routing, recovery, and notification layer.
 
 ## Commands
 
@@ -18,13 +18,13 @@ Example:
 
 The endpoint must be a direct HTTPS download on port 443, without redirects or credentials, and resolve only to public IP addresses including at least one IPv4 address. Connect timeout is 1-60 seconds; maximum test time is 1-120 seconds. User-added profiles are stored in the bot SQLite state database and appear in `/speed`. Measurements always use the current tunnel interface; the endpoint's country is independent of the selected VPN location.
 
-By default, every `TG_ALLOWED_CHAT_IDS` entry is also an administrator. To use a smaller admin set, define `TG_ADMIN_CHAT_IDS` as a comma-separated subset of `TG_ALLOWED_CHAT_IDS` in `/etc/vpngw-bot.env`.
+`TG_ALLOWED_CHAT_IDS` and `TG_ADMIN_CHAT_IDS` accept only positive private-chat/user IDs; group and channel IDs are rejected so every allowed principal is a single account. By default, every allowed chat ID is also an administrator. To use a smaller admin set, define `TG_ADMIN_CHAT_IDS` as a comma-separated subset of `TG_ALLOWED_CHAT_IDS` in `/etc/vpngw-bot.env`.
 
 ## Deployment
 
 The Pi deployment uses `/home/pi/.venv`, `/etc/vpngw-bot.env`, `/etc/vpngw-bot.conf`, `/etc/vpngw-speed-tests.conf`, and `/var/lib/vpngw`. Store `TG_TOKEN` only in the protected environment file; never put it in a command line or this repository.
 
-Only this Python service polls Telegram. The legacy `vpn-tg-bot.service` must be disabled. Manual bot switches and automatic starter recovery share the `/dev/shm/vpn_stats/vpn-switch.lock`; if either path is busy, the competing operation fails immediately with an explicit retry message.
+Only the Python service polls Telegram. Manual bot switches and automatic starter recovery share the `/dev/shm/vpn_stats/vpn-switch.lock`; if either path is busy, the competing operation fails immediately with an explicit retry message.
 
 From the deployed checkout on the Pi:
 
@@ -32,7 +32,7 @@ From the deployed checkout on the Pi:
 sudo /home/pi/app/vpngw/tools/pi-bot-deploy-commands.sh
 ```
 
-The script installs and enables the Python systemd unit, updates the root recovery/logging scripts, installs the sudoers allowlist, fixes the runtime directory and SQLite permissions, disables the legacy shell bot, and restarts `vpngw-bot.service`. It does not change the VPN location. The service runs as `vpngw-bot`; only the switch helper runs as root.
+The script installs and enables the Python systemd unit, updates the root recovery/logging scripts, installs the sudoers allowlist, fixes the runtime directory and SQLite permissions, and restarts `vpngw-bot.service`. It does not change the VPN location. The service runs as `vpngw-bot`; only the switch helper runs as root.
 
 ## Operations
 

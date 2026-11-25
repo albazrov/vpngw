@@ -1,6 +1,6 @@
 # Python Telegram bot: production runbook
 
-This runbook describes the supported Python bot release. It assumes a new Python deployment; the legacy shell Telegram bot is not a supported runtime, migration target, or rollback option. Bash remains in use for VPN, routing, and recovery helpers.
+This runbook describes the Python bot release. Bash remains in use for VPN, routing, recovery, and notification helpers.
 
 ## Runtime layout
 

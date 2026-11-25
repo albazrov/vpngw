@@ -4,7 +4,8 @@
 set -euo pipefail
 
 CONFIG_FILE="/etc/vpn-gw.conf"
-BOT_UNIT="vpn-tg-bot.service"
+BOT_ENV_FILE="/etc/vpngw-bot.env"
+BOT_UNIT="vpngw-bot.service"
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 COLLECTED_AT=$(date --iso-8601=seconds)
 REPORT_OUTPUT="${1:-/root/vpngw-production-inventory-update-$STAMP.md}"
@@ -66,6 +67,15 @@ set +u
 source "$CONFIG_FILE"
 set -u
 CONFIGURED_TG_TOKEN="${TG_TOKEN:-}"
+PYTHON_BOT_TOKEN=""
+if [[ -r "$BOT_ENV_FILE" ]]; then
+    PYTHON_BOT_TOKEN=$(sed -n 's/^TG_TOKEN=//p' "$BOT_ENV_FILE" | tail -n 1)
+    if [[ "$PYTHON_BOT_TOKEN" == \"*\" && "$PYTHON_BOT_TOKEN" == *\" ]]; then
+        PYTHON_BOT_TOKEN="${PYTHON_BOT_TOKEN:1:${#PYTHON_BOT_TOKEN}-2}"
+    elif [[ "$PYTHON_BOT_TOKEN" == \'*\' && "$PYTHON_BOT_TOKEN" == *\' ]]; then
+        PYTHON_BOT_TOKEN="${PYTHON_BOT_TOKEN:1:${#PYTHON_BOT_TOKEN}-2}"
+    fi
+fi
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_DIR=$(dirname -- "$SCRIPT_DIR")
 
@@ -89,14 +99,21 @@ for name in "${safe_config_vars[@]}"; do
 done
 
 section "Secret exposure check (values suppressed)"
-if [[ -n "${TG_TOKEN:-}" ]]; then
+configured_tokens=()
+[[ -n "$CONFIGURED_TG_TOKEN" ]] && configured_tokens+=("$CONFIGURED_TG_TOKEN")
+[[ -n "$PYTHON_BOT_TOKEN" && "$PYTHON_BOT_TOKEN" != "$CONFIGURED_TG_TOKEN" ]] && \
+    configured_tokens+=("$PYTHON_BOT_TOKEN")
+if ((${#configured_tokens[@]} > 0)); then
     token_arg_count=0
     for cmdline_file in /proc/[0-9]*/cmdline; do
         [[ -r "$cmdline_file" ]] || continue
         process_args=$(tr '\0' ' ' < "$cmdline_file" 2>/dev/null || true)
-        if [[ "$process_args" == *"$TG_TOKEN"* ]]; then
-            token_arg_count=$((token_arg_count + 1))
-        fi
+        for configured_token in "${configured_tokens[@]}"; do
+            if [[ "$process_args" == *"$configured_token"* ]]; then
+                token_arg_count=$((token_arg_count + 1))
+                break
+            fi
+        done
     done
     if (( token_arg_count > 0 )); then
         TOKEN_ARG_STATUS="YES ($token_arg_count process(es))"
@@ -107,15 +124,18 @@ if [[ -n "${TG_TOKEN:-}" ]]; then
     fi
     unset process_args
 else
-    TOKEN_ARG_STATUS="NOT CHECKED (TG_TOKEN unset)"
-    printf 'TG_TOKEN is unset; process-argument check was not possible\n'
+    TOKEN_ARG_STATUS="NOT CHECKED (no Telegram token configured)"
+    printf 'No Telegram token was available; process-argument check was not possible\n'
 fi
-unset TG_TOKEN
+unset TG_TOKEN configured_tokens configured_token
 
 redact_sensitive_text() {
     local text="$1"
     if [[ -n "$CONFIGURED_TG_TOKEN" ]]; then
         text=${text//"$CONFIGURED_TG_TOKEN"/[REDACTED_TELEGRAM_TOKEN]}
+    fi
+    if [[ -n "$PYTHON_BOT_TOKEN" ]]; then
+        text=${text//"$PYTHON_BOT_TOKEN"/[REDACTED_TELEGRAM_TOKEN]}
     fi
     printf '%s\n' "$text" | sed -E \
         -e 's/[0-9]{8,}:[A-Za-z0-9_-]{20,}/[REDACTED_TELEGRAM_TOKEN]/g' \
@@ -194,7 +214,6 @@ OS_VERSION_CODENAME=$(awk -F= '$1 == "VERSION_CODENAME" {gsub(/^"|"$/, "", $2); 
 ARCHITECTURE=$(dpkg --print-architecture 2>/dev/null || printf 'unknown')
 KERNEL_INFO=$(uname -srmo 2>/dev/null || printf 'unknown')
 CONFIG_METADATA=$(stat -c '%U:%G %a %n' "$CONFIG_FILE" /etc/msmtprc 2>&1 || true)
-BOT_SCRIPT_METADATA=$(stat -c '%U:%G %a %n' /usr/local/bin/vpngw/vpn-tg-bot.sh 2>&1 || true)
 FUNCTIONS_METADATA=$(stat -c '%U:%G %a %n' /usr/local/bin/vpngw/vpn-functions.sh 2>&1 || true)
 RUNTIME_DIR_METADATA=$(stat -c '%F %U:%G %a %n' /dev/shm/vpn_stats 2>&1 || printf 'MISSING /dev/shm/vpn_stats\n')
 EXTERNAL_MOUNT=$(findmnt -n -o SOURCE,FSTYPE,TARGET -T /mnt/external_data 2>&1 || printf 'NOT MOUNTED /mnt/external_data\n')
@@ -224,14 +243,21 @@ file_sha256() {
         printf 'MISSING'
     fi
 }
-PRODUCTION_BOT_SHA256=$(file_sha256 /usr/local/bin/vpngw/vpn-tg-bot.sh)
 PRODUCTION_FUNCTIONS_SHA256=$(file_sha256 /usr/local/bin/vpngw/vpn-functions.sh)
-SOURCE_BOT_SHA256=$(file_sha256 "$REPO_DIR/vpn-tg-bot.sh")
 SOURCE_FUNCTIONS_SHA256=$(file_sha256 "$REPO_DIR/vpn-functions.sh")
-PRODUCTION_PAYLOAD_MATCH="NO"
-if [[ "$PRODUCTION_BOT_SHA256" == "$SOURCE_BOT_SHA256" && \
+FUNCTIONS_PAYLOAD_MATCH="NO"
+if [[ "$PRODUCTION_FUNCTIONS_SHA256" != "MISSING" && \
+      "$SOURCE_FUNCTIONS_SHA256" != "MISSING" && \
       "$PRODUCTION_FUNCTIONS_SHA256" == "$SOURCE_FUNCTIONS_SHA256" ]]; then
-    PRODUCTION_PAYLOAD_MATCH="YES"
+    FUNCTIONS_PAYLOAD_MATCH="YES"
+fi
+PRODUCTION_SERVICE_SHA256=$(file_sha256 /etc/systemd/system/vpngw-bot.service)
+SOURCE_SERVICE_SHA256=$(file_sha256 "$REPO_DIR/python_bot/systemd/vpngw-bot.service")
+SUPPORTED_BOT_PAYLOAD_MATCH="NO"
+if [[ "$PRODUCTION_SERVICE_SHA256" != "MISSING" && \
+      "$SOURCE_SERVICE_SHA256" != "MISSING" && \
+      "$PRODUCTION_SERVICE_SHA256" == "$SOURCE_SERVICE_SHA256" ]]; then
+    SUPPORTED_BOT_PAYLOAD_MATCH="YES"
 fi
 SOURCE_SHA=$(git -C "$REPO_DIR" rev-parse --short HEAD 2>/dev/null || printf 'not a git checkout / unknown')
 SOURCE_STATE="unknown"
@@ -254,10 +280,7 @@ fi
 IP_FORWARD_STATE=$(sysctl -n net.ipv4.ip_forward 2>/dev/null || printf 'unknown')
 FUNCTIONS_BACKUP_PATH=$(find /usr/local/bin/vpngw -maxdepth 1 -type f \
     -name 'vpn-functions.sh.pre-0.1.*' -print 2>/dev/null | sort | tail -n 1)
-BOT_BACKUP_PATH=$(find /usr/local/bin/vpngw -maxdepth 1 -type f \
-    -name 'vpn-tg-bot.sh.pre-0.1.*' -print 2>/dev/null | sort | tail -n 1)
 [[ -n "$FUNCTIONS_BACKUP_PATH" ]] || FUNCTIONS_BACKUP_PATH="NOT FOUND"
-[[ -n "$BOT_BACKUP_PATH" ]] || BOT_BACKUP_PATH="NOT FOUND"
 FAKE_CLI_TEST_STATUS="NOT FOUND"
 if [[ -f "$REPO_DIR/tests/test_adguard_cli.sh" && "$SOURCE_STATE" == "clean" ]]; then
     if bash "$REPO_DIR/tests/test_adguard_cli.sh" >/dev/null 2>&1; then
@@ -302,18 +325,17 @@ done <<< "$CRONTAB_SAFE")
     printf -- '- Kernel: `%s`\n' "$KERNEL_INFO"
     printf -- '- Architecture: `%s`\n' "$ARCHITECTURE"
     printf -- '- Production repository HEAD: `%s`\n' "$PRODUCTION_REPO_HEAD"
-    printf -- '- Production `vpn-tg-bot.sh` SHA-256: `%s`\n' "$PRODUCTION_BOT_SHA256"
     printf -- '- Production `vpn-functions.sh` SHA-256: `%s`\n' "$PRODUCTION_FUNCTIONS_SHA256"
     printf -- '- Source checkout SHA/state: `%s` / `%s`\n' "$SOURCE_SHA" "$SOURCE_STATE"
-    printf -- '- Source `vpn-tg-bot.sh` SHA-256: `%s`\n' "$SOURCE_BOT_SHA256"
     printf -- '- Source `vpn-functions.sh` SHA-256: `%s`\n' "$SOURCE_FUNCTIONS_SHA256"
-    printf -- '- Production payload matches source files: **%s**\n' "$PRODUCTION_PAYLOAD_MATCH"
+    printf -- '- `vpn-functions.sh` matches source: **%s**\n' "$FUNCTIONS_PAYLOAD_MATCH"
+    printf -- '- Supported bot unit matches source: **%s**\n' "$SUPPORTED_BOT_PAYLOAD_MATCH"
     printf -- '- Docker Engine: `%s`\n' "$DOCKER_VERSION"
     printf -- '- Docker Compose: `%s`\n' "$DOCKER_COMPOSE_VERSION"
     printf -- '- Running containers (name | image | state):\n\n```text\n%s\n```\n\n' "$DOCKER_CONTAINERS"
 
-    printf '## File metadata (no file contents)\n\n```text\n%s\n%s\n%s\n```\n\n' \
-        "$CONFIG_METADATA" "$BOT_SCRIPT_METADATA" "$FUNCTIONS_METADATA"
+    printf '## File metadata (no file contents)\n\n```text\n%s\n%s\n```\n\n' \
+        "$CONFIG_METADATA" "$FUNCTIONS_METADATA"
     printf -- '- `/dev/shm/vpn_stats`: `%s`\n' "$RUNTIME_DIR_METADATA"
     printf -- '- External mount: `%s`\n' "$EXTERNAL_MOUNT"
     printf -- '- External disk: `%s`\n\n' "$EXTERNAL_DISK"
@@ -338,16 +360,14 @@ done <<< "$CRONTAB_SAFE")
     printf 'Sanitized schedule summary (command arguments omitted):\n\n%s\n' "$ROOT_CRONTAB_SUMMARY"
     printf '\nFull redacted crontab is only in the private snapshot; review it locally before use.\n\n'
 
-    printf '## Runbook task 0.1: result fields\n\n'
+    printf '## Deployment result fields\n\n'
     printf -- '- Source checkout commit/state: `%s` / `%s`\n' "$SOURCE_SHA" "$SOURCE_STATE"
     printf -- '- Production repository HEAD (not proof of deployed file contents): `%s`\n' "$PRODUCTION_REPO_HEAD"
-    printf -- '- Production payload matches source files: **%s**\n' "$PRODUCTION_PAYLOAD_MATCH"
-    printf -- '- Source `vpn-tg-bot.sh` SHA-256: `%s`\n' "$SOURCE_BOT_SHA256"
-    printf -- '- Production `vpn-tg-bot.sh` SHA-256: `%s`\n' "$PRODUCTION_BOT_SHA256"
+    printf -- '- `vpn-functions.sh` matches source: **%s**\n' "$FUNCTIONS_PAYLOAD_MATCH"
+    printf -- '- Supported bot unit matches source: **%s**\n' "$SUPPORTED_BOT_PAYLOAD_MATCH"
     printf -- '- Source `vpn-functions.sh` SHA-256: `%s`\n' "$SOURCE_FUNCTIONS_SHA256"
     printf -- '- Production `vpn-functions.sh` SHA-256: `%s`\n' "$PRODUCTION_FUNCTIONS_SHA256"
     printf -- '- `vpn-functions.sh` backup path: `%s`\n' "$FUNCTIONS_BACKUP_PATH"
-    printf -- '- `vpn-tg-bot.sh` backup path: `%s`\n' "$BOT_BACKUP_PATH"
     printf -- '- Fake CLI test: **%s**\n' "$FAKE_CLI_TEST_STATUS"
     printf -- '- Bot service health: `%s`\n' "$BOT_SERVICE_STATE"
     printf -- '- VPN interface check: `%s`\n' "$VPN_INTERFACE_STATE"
@@ -367,6 +387,6 @@ done <<< "$CRONTAB_SAFE")
 chmod 0600 "$TEMP_REPORT"
 mv -- "$TEMP_REPORT" "$REPORT_OUTPUT"
 trap - EXIT
-unset CONFIGURED_TG_TOKEN CRONTAB_RAW
+unset CONFIGURED_TG_TOKEN PYTHON_BOT_TOKEN CRONTAB_RAW
 printf 'Inventory update report: %s (mode 0600)\nPrivate details snapshot: %s (mode 0600)\n' \
     "$REPORT_OUTPUT" "$DETAILS_OUTPUT" >&2

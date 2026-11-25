@@ -44,11 +44,19 @@ if ! acquire_vpn_switch_lock; then
     exit 75
 fi
 
-"$adguard_bin" connect -l "$location"
+timeout 40s "$adguard_bin" connect -l "$location"
 VPNGW_FUNCTIONS="$functions_file" "$bypass_script" 8>&-
 sleep 5
 if ! check_vpn_connectivity "$VPN_IF"; then
     echo "VPN connectivity check failed on $VPN_IF" >&2
+    exit 1
+fi
+actual_location=$(check_geo "$VPN_IF") || {
+    echo "Unable to verify VPN location on $VPN_IF" >&2
+    exit 1
+}
+if [[ "$actual_location" != "$location" ]]; then
+    echo "VPN location mismatch: requested $location, observed $actual_location" >&2
     exit 1
 fi
 
