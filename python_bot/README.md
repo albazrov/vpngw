@@ -9,6 +9,7 @@ This is the Telegram bot for the current release. The service runs as `vpngw-bot
 - `/speed`: choose a configured speed-test service.
 - `/speedadd <id> <name> <https-url> <connect-timeout> <max-time>`: add a speed-test service as an administrator. The name is one word.
 - Menu buttons switch to the fixed VPN locations or run status/speed checks. Long operations show progress and then update the same message.
+- The hourly shell report sends a separate Telegram notification when `adguardvpn-cli status` reports an available update. “No update” and “up-to-date” output is ignored.
 
 Example:
 

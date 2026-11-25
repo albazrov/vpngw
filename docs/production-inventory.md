@@ -137,6 +137,7 @@ The supplied comment says auth monitoring performs 10 polls × 10 seconds. The s
 | --- | --- | --- |
 | `REPORT_TO_TG` / `REPORT_TG_INTERVAL` | `true` / `60` minutes | Hourly cron aligns with this interval |
 | `REPORT_TO_EMAIL` / `REPORT_EMAIL_INTERVAL` | `true` / `30` minutes | Cron invokes report hourly, so effective scheduled cadence is at most once per hour |
+| AdGuard CLI update notice | Checked during each sent Telegram hourly report | Available-version output is sent as a separate Telegram message; up-to-date/no-update output is ignored |
 | `TG_TOKEN` | Not recorded | Secret; verify presence/permission without printing |
 | `TG_CHAT_ID` | Not recorded | Access-control identifier; verify securely |
 | SMTP password/credentials | Not recorded | Secret; inspect only metadata and service access |

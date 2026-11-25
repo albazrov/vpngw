@@ -54,6 +54,8 @@ Expected: service active; runtime directory `root:root 700`; database files writ
 
 The runtime directory is volatile and is recreated at boot by systemd-tmpfiles. Verify it after reboot with the `stat` command above. Never use mode `0777`.
 
+The root hourly report calls `adguardvpn-cli status` with a bounded timeout. If the CLI announces a newer version, the bot receives a separate Telegram message immediately after the normal hourly report. Current-version and no-update responses do not generate a message.
+
 ## Verification
 
 Local checks before release:
