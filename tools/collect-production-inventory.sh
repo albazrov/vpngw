@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC1090
+# shellcheck disable=SC2016
 set -euo pipefail
 
 CONFIG_FILE="/etc/vpn-gw.conf"
@@ -197,7 +199,6 @@ FUNCTIONS_METADATA=$(stat -c '%U:%G %a %n' /usr/local/bin/vpngw/vpn-functions.sh
 RUNTIME_DIR_METADATA=$(stat -c '%F %U:%G %a %n' /dev/shm/vpn_stats 2>&1 || printf 'MISSING /dev/shm/vpn_stats\n')
 EXTERNAL_MOUNT=$(findmnt -n -o SOURCE,FSTYPE,TARGET -T /mnt/external_data 2>&1 || printf 'NOT MOUNTED /mnt/external_data\n')
 EXTERNAL_DISK=$(df -hP /mnt/external_data 2>&1 | tail -n 1 || true)
-PRODUCTION_SHA=$(git -C /usr/local/bin/vpngw rev-parse --short HEAD 2>/dev/null || printf 'not a git checkout / unknown')
 BOT_UNIT_FACTS=$(systemctl show "$BOT_UNIT" --no-pager \
     -p Id -p Description -p FragmentPath -p LoadState -p UnitFileState \
     -p ActiveState -p SubState -p Type -p User -p Group -p Restart \
