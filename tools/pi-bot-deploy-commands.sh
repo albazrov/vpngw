@@ -135,7 +135,7 @@ if systemctl is-active --quiet vpn-tg-bot.service; then
 fi
 
 printf '\n--- STATUS CHECK ---\n'
-ps -eo pid,uid,comm,args --forest | grep -E 'vpngw_bot|python -m vpngw_bot|telegram' | grep -v grep || true
+pgrep -a -f 'python -m vpngw_bot' || true
 printf '\n--- SAFE FILES ---\n'
 ls -l /etc/vpngw-bot.env /etc/vpngw-bot.conf
 ls -l /etc/vpngw-speed-tests.conf
