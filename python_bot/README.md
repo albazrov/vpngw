@@ -24,13 +24,15 @@ By default, every `TG_ALLOWED_CHAT_IDS` entry is also an administrator. To use a
 
 The Pi deployment uses `/home/pi/.venv`, `/etc/vpngw-bot.env`, `/etc/vpngw-bot.conf`, `/etc/vpngw-speed-tests.conf`, and `/var/lib/vpngw`. Store `TG_TOKEN` only in the protected environment file; never put it in a command line or this repository.
 
+Only this Python service polls Telegram. The legacy `vpn-tg-bot.service` must be disabled. Manual bot switches and automatic starter recovery share the `/dev/shm/vpn_stats/vpn-switch.lock`; if either path is busy, the competing operation fails immediately with an explicit retry message.
+
 From the deployed checkout on the Pi:
 
 ```bash
 sudo /home/pi/app/vpngw/tools/pi-bot-deploy-commands.sh
 ```
 
-The script installs and enables the Python systemd unit, helper scripts, sudoers allowlist, runtime directory and SQLite permissions, then restarts `vpngw-bot.service`. It does not change the VPN location. The service runs as `vpngw-bot`; only the switch helper runs as root.
+The script installs and enables the Python systemd unit, updates the root recovery/logging scripts, installs the sudoers allowlist, fixes the runtime directory and SQLite permissions, disables the legacy shell bot, and restarts `vpngw-bot.service`. It does not change the VPN location. The service runs as `vpngw-bot`; only the switch helper runs as root.
 
 ## Operations
 
@@ -42,6 +44,8 @@ sudo stat -c '%U:%G %a %n' /dev/shm/vpn_stats /var/lib/vpngw/bot_state.db
 ```
 
 Expected permissions are `root:root 700` for `/dev/shm/vpn_stats` and `vpngw-bot:vpngw-bot` for the bot database files. A SQLite `readonly database` startup error usually means the database file is not writable by the service account.
+
+`vpn-log-sync.sh` is the only script that drains `vpn-live.log` into the persistent log. Writers and the drainer share `vpn-log.lock`, preventing a writer from appending while the RAM log is copied and truncated.
 
 After reboot, `/dev/shm` is recreated. The deploy script installs and applies the tmpfiles rule described in the [production runbook](../docs/runbooks/python-bot-production.md), so root-owned recovery scripts have their required directory before their first run.
 

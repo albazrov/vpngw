@@ -37,11 +37,16 @@ if [[ "$(stat -c '%u:%g:%a' /dev/shm/vpn_stats)" != "0:0:700" ]]; then
     exit 1
 fi
 
+# shellcheck disable=SC1090
+. "$functions_file"
+if ! acquire_vpn_switch_lock; then
+    echo "VPN switch is already in progress; retry after the current operation finishes" >&2
+    exit 75
+fi
+
 "$adguard_bin" connect -l "$location"
 VPNGW_FUNCTIONS="$functions_file" "$bypass_script" 8>&-
 sleep 5
-# shellcheck disable=SC1090
-. "$functions_file"
 if ! check_vpn_connectivity "$VPN_IF"; then
     echo "VPN connectivity check failed on $VPN_IF" >&2
     exit 1

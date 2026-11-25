@@ -17,8 +17,16 @@ else
     exit 1
 fi
 
+FUNCTIONS_LIB="${VPNGW_FUNCTIONS:-$MAIN_SH_DIR/vpn-functions.sh}"
+if [ -f "$FUNCTIONS_LIB" ]; then
+    # shellcheck disable=SC1090
+    source "$FUNCTIONS_LIB"
+else
+    echo "Ошибка: Библиотека функций $FUNCTIONS_LIB не найдена!" >&2
+    exit 1
+fi
 
-log_msg() { echo "$(date '+%Y-%m-%d %H:%M:%S') - [LOC-UPDATE] $1" >> "$LOG_RAM"; }
+log_msg() { log_message "$1" "LOC-UPDATE"; }
 
 log_msg "Starting scheduled locations update..."
 # Получаем список, чистим от мусора

@@ -20,7 +20,23 @@ install -d -o root -g root -m 0755 /usr/local/bin/vpngw /usr/local/libexec/vpngw
 install -d -o root -g root -m 0755 /etc/tmpfiles.d
 install -o root -g root -m 0644 /home/pi/app/vpngw/deploy/vpngw-tmpfiles.conf.example /etc/tmpfiles.d/vpngw.conf
 systemd-tmpfiles --create /etc/tmpfiles.d/vpngw.conf
-install -o root -g root -m 0644 /home/pi/app/vpngw/vpn-functions.sh /usr/local/bin/vpngw/vpn-functions.sh
+
+ROOT_SCRIPTS=(
+  adguardvpn-starter.sh
+  vpn-auth-helper.sh
+  vpn-bypass-update.sh
+  vpn-email-send.sh
+  vpn-functions.sh
+  vpn-hourly-report.sh
+  vpn-hw-check.sh
+  vpn-loc-update.sh
+  vpn-log-sync.sh
+  vpn-tg-send.sh
+)
+for script in "${ROOT_SCRIPTS[@]}"; do
+  install -o root -g root -m 0755 "/home/pi/app/vpngw/$script" "/usr/local/bin/vpngw/$script"
+done
+
 if [[ ! -f /etc/vpngw-speed-tests.conf ]]; then
   install -o root -g vpngw-bot -m 0640 /home/pi/app/vpngw/vpn-speed-tests.conf.example /etc/vpngw-speed-tests.conf
 fi
@@ -87,11 +103,36 @@ for database in /var/lib/vpngw/bot_state.db /var/lib/vpngw/bot_queue.db; do
 done
 
 install -o root -g root -m 0644 /home/pi/app/vpngw/python_bot/systemd/vpngw-bot.service /etc/systemd/system/vpngw-bot.service
+systemctl disable --now vpn-tg-bot.service 2>/dev/null || true
 systemctl daemon-reload
 systemctl enable vpngw-bot.service
 systemctl stop vpngw-bot.service 2>/dev/null || true
 systemctl restart vpngw-bot.service
 systemctl status vpngw-bot.service --no-pager -l --lines=25
+
+CRON_CURRENT=$(mktemp /tmp/vpngw-root-crontab.XXXXXX)
+CRON_UPDATED="${CRON_CURRENT}.updated"
+trap 'rm -f "$CRON_CURRENT" "$CRON_UPDATED"' EXIT
+if crontab -l > "$CRON_CURRENT" 2>/dev/null; then
+  awk '
+    index($0, "/usr/local/bin/vpngw/") &&
+    index($0, "| systemd-cat") &&
+    !index($0, "2>&1 | systemd-cat") {
+      sub(/\| systemd-cat/, "2>\\&1 | systemd-cat")
+    }
+    { print }
+  ' "$CRON_CURRENT" > "$CRON_UPDATED"
+  if ! cmp -s "$CRON_CURRENT" "$CRON_UPDATED"; then
+    crontab "$CRON_UPDATED"
+  fi
+fi
+rm -f "$CRON_CURRENT" "$CRON_UPDATED"
+trap - EXIT
+
+if systemctl is-active --quiet vpn-tg-bot.service; then
+  echo "Legacy vpn-tg-bot.service is still active; duplicate Telegram polling remains possible." >&2
+  exit 1
+fi
 
 printf '\n--- STATUS CHECK ---\n'
 ps -eo pid,uid,comm,args --forest | grep -E 'vpngw_bot|python -m vpngw_bot|telegram' | grep -v grep || true

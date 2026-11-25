@@ -157,7 +157,7 @@ The following was supplied as output of `sudo crontab -l`; `MAILTO=""` disables 
 | Daily at 03:00 | `/usr/local/bin/vpngw/vpn-loc-update.sh \| systemd-cat -t LOC-UPDATE` | Refresh location cache |
 | Daily at 02:00 | `/usr/local/bin/vpngw/vpn-bypass-update.sh force \| systemd-cat -t BYPASS-UPDATE` | Force IP feed refresh; may exit if another bypass update holds lock |
 
-The Telegram bot is not listed in this crontab; it is supervised by `vpngw-bot.service`. There is currently no shared lock between manual bot reconnects and the minute-by-minute starter; coordinate production location changes with the recovery starter.
+The Telegram bot is not listed in this crontab; it is supervised by `vpngw-bot.service`. The legacy `vpn-tg-bot.service` must be disabled. Manual bot reconnects and minute-by-minute starter recovery share `/dev/shm/vpn_stats/vpn-switch.lock`; the competing operation fails explicitly while a switch is in progress.
 
 ## Historical shell bot systemd observation
 
@@ -183,6 +183,8 @@ Snapshot supplied by the operator on 2026-10-31 (times shown by the host in MSK)
 | Effective group | Default/empty in unit | Collector showed no explicit `Group` value |
 | Sandboxing | `NoNewPrivileges=no`, `PrivateTmp=no`, `ProtectSystem=no`, `ProtectHome=no`, no read/write path restrictions, full capability set | Collector output; service is effectively unsandboxed and runs as root |
 | Startup log error | Shell bot failed to append `/dev/shm/vpn_stats/vpn-live.log` when the parent directory did not exist | Historical; current Python service logs through systemd journal |
+| VPN switch contention | Manual bot switch and starter recovery could call `connect` concurrently | Current deployment uses one shared nonblocking lock |
+| Log transfer contention | Log sync and hourly report both copied/truncated the RAM log | Only `vpn-log-sync.sh` drains the log; writers and drainer use `vpn-log.lock` |
 
 **Historical credential incident:** the old shell Telegram bot exposed its token in process arguments. The Python release reads `TG_TOKEN` from `/etc/vpngw-bot.env` and is deployed. Whether the previously exposed credential was rotated and a post-deploy argv scan passed is not recorded here. Never copy token values into this inventory, logs, PRs or support messages.
 

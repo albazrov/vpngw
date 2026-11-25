@@ -15,6 +15,15 @@ else
     exit 1
 fi
 
+FUNCTIONS_LIB="${VPNGW_FUNCTIONS:-$MAIN_SH_DIR/vpn-functions.sh}"
+if [ -f "$FUNCTIONS_LIB" ]; then
+    # shellcheck disable=SC1090
+    source "$FUNCTIONS_LIB"
+else
+    echo "Ошибка: Библиотека функций $FUNCTIONS_LIB не найдена!" >&2
+    exit 1
+fi
+
 # Перехватываем два параметра: первый — ТЕМА, второй — СООБЩЕНИЕ
 RAW_SUBJECT="$1"
 MESSAGE="$2"
@@ -36,9 +45,9 @@ SUBJECT="=?UTF-8?B?${ENCODED_SUBJECT}?="
 
 # Отправка через msmtp по проверенной и рабочей схеме
 if echo -e "From: $FROMTEXT <$FROM>\nTo: $TO\nSubject: $SUBJECT\n\n$MESSAGE" | msmtp -C "$MSMTP_CONF" -a "$MSMTP_ACC" al.bazrov@yandex.ru tunmonitor@gmail.com; then
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - [EMAIL-SEND] Success sent to mail boxes" >> "$LOG_RAM"
+    log_message "Success sent to mail boxes" "EMAIL-SEND"
     exit 0
 else
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - [EMAIL-SEND] ERROR: Failed to send email." >> "$LOG_RAM"
+    log_message "ERROR: Failed to send email." "EMAIL-SEND"
     exit 1
 fi

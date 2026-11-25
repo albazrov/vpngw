@@ -163,11 +163,4 @@ if should_send "$REPORT_TO_EMAIL" "$REPORT_EMAIL_INTERVAL" "$EM_LAST_SEND_FILE";
     fi
 fi
 
-# === 4. ЕЖЕЧАСНЫЙ СБРОС ЖИВЫХ ЛОГОВ НА ФЛЕШКУ ===
-# Выполняется строго один раз в час (в районе 55-59 минут каждого часа)
-if [ "$(date +%M)" -ge 55 ]; then
-    if [ -f "/dev/shm/vpn_stats/vpn-live.log" ]; then
-        cat /dev/shm/vpn_stats/vpn-live.log >> /mnt/external_data/vpn-gateway.log
-        : > /dev/shm/vpn_stats/vpn-live.log
-    fi
-fi
+# RAM-лог переносится только vpn-log-sync.sh под общим lock.

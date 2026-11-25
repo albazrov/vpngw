@@ -40,7 +40,7 @@ DEBUG=true
 # --- БЛОКИРОВКА ПАРАЛЛЕЛЬНОГО ЗАПУСКА ---
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - [BYPASS] Skip: script already running." >> "$LOG_RAM"
+    log_message "Skip: script already running." "BYPASS"
     exit 0
 fi
 

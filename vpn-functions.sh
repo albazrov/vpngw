@@ -9,6 +9,26 @@
 
 # Библиотека общих функций для управления VPN
 
+acquire_vpn_switch_lock() {
+    local lock_file
+
+    ensure_stats_dir || {
+        printf 'Unsafe or missing stats directory: %s (expected root:root 0700)\n' \
+            "${STATS_DIR:-unset}" >&2
+        return 1
+    }
+
+    lock_file="$STATS_DIR/vpn-switch.lock"
+    exec 8>"$lock_file" || {
+        printf 'Unable to open VPN switch lock: %s\n' "$lock_file" >&2
+        return 1
+    }
+    if ! flock -n 8; then
+        printf 'VPN switch already in progress\n' >&2
+        return 75
+    fi
+}
+
 run_adguard_connect() {
     local location="${1:-}"
 
@@ -266,6 +286,7 @@ check_geo() {
 log_message() {
     local msg="$1"
     local tag="${2:-SYSTEM}" # Если второй параметр не передан, будет [SYSTEM]
+    local log_fd
 
     if ! ensure_stats_dir; then
         printf 'Unsafe or missing stats directory: %s (expected root:root 0700)\n' "${STATS_DIR:-unset}" >&2
@@ -278,8 +299,46 @@ log_message() {
     [[ "$tag" == "STARTER" ]] && tag_color="$CLR_YLW"
     [[ "$tag" == "MONITOR" ]] && tag_color="$CLR_RED"
 
-    # Пишем в лог: [ТЕГ] сообщение (с включенным -e для обработки цветов)
-    echo -e "$(date '+%Y-%m-%d %H:%M:%S') - ${tag_color}[$tag]${CLR_RST} $msg" >> "$LOG_RAM"
+    exec {log_fd}>"$STATS_DIR/vpn-log.lock" || return 1
+    flock "$log_fd" || return 1
+    if ! printf '%b\n' "$(date '+%Y-%m-%d %H:%M:%S') - ${tag_color}[$tag]${CLR_RST} $msg" >> "$LOG_RAM"; then
+        exec {log_fd}>&-
+        return 1
+    fi
+    exec {log_fd}>&-
+}
+
+flush_vpn_log() {
+    local log_fd log_size
+
+    if ! ensure_stats_dir; then
+        printf 'Unsafe or missing stats directory: %s (expected root:root 0700)\n' "${STATS_DIR:-unset}" >&2
+        return 1
+    fi
+    if [[ -z "${LOG_RAM:-}" || -z "${LOG_DISK:-}" ]]; then
+        printf 'LOG_RAM and LOG_DISK must be configured\n' >&2
+        return 1
+    fi
+
+    exec {log_fd}>"$STATS_DIR/vpn-log.lock" || return 1
+    flock "$log_fd" || return 1
+    if [[ -s "$LOG_RAM" ]]; then
+        if ! cat "$LOG_RAM" >> "$LOG_DISK" || ! : > "$LOG_RAM"; then
+            exec {log_fd}>&-
+            return 1
+        fi
+        log_size=$(stat -c%s "$LOG_DISK") || {
+            exec {log_fd}>&-
+            return 1
+        }
+        if (( log_size > 2097152 )); then
+            if ! mv -f "$LOG_DISK" "${LOG_DISK}.1" || ! : > "$LOG_DISK"; then
+                exec {log_fd}>&-
+                return 1
+            fi
+        fi
+    fi
+    exec {log_fd}>&-
 }
 
 # --- СТАТИСТИКА И УВЕДОМЛЕНИЯ ---

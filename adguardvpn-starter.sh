@@ -28,7 +28,6 @@ fi
 
 # Локальные технические настройки
 DEBUG=true
-LOCK_FILE="/dev/shm/adguardvpn-starter.lock"
 TIMEOUT_CMD="timeout 40s"
 
 # --- ВНУТРЕННИЕ ФУНКЦИИ ---
@@ -37,8 +36,7 @@ TIMEOUT_CMD="timeout 40s"
 debug_log() { $DEBUG && log_message "DEBUG: $1" "STARTER"; }
 
 # --- БЛОКИРОВКА ---
-exec 8>"$LOCK_FILE"
-if ! flock -n 8; then
+if ! acquire_vpn_switch_lock; then
     debug_log "Process already running. Lock file active."
     exit 0
 fi
