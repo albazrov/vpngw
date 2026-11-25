@@ -13,6 +13,10 @@ on:
       - ready_for_review
       - edited
 
+permissions:
+  contents: read
+  issues: write
+
 jobs:
   lint-shell:
     name: Shell validation
@@ -77,6 +81,7 @@ jobs:
           bash tests/test_telegram_token_argv.sh
           bash tests/test_runtime_directory_permissions.sh
           bash tests/test_speed_test_http_status.sh
+          bash tests/test_vpn_runtime_locks.sh
 
       - name: Run Python bot tests
         run: python -m pytest -q python_bot/tests
