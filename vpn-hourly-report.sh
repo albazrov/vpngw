@@ -130,6 +130,14 @@ if should_send "$REPORT_TO_TG" "$REPORT_TG_INTERVAL" "$TG_LAST_SEND_FILE"; then
     send_tg "$REPORT"
     echo "$NOW_SEC" > "$TG_LAST_SEND_FILE"
     log_message "Report successfully sent to Telegram (Interval: ${REPORT_TG_INTERVAL}m)" "REPORT"
+
+    ADG_STATUS_OUTPUT=$(timeout 15s "$ADG_BIN" status 2>&1 || true)
+    if ADG_UPDATE_NOTICE=$(printf '%s\n' "$ADG_STATUS_OUTPUT" | extract_adguard_update_notice); then
+        send_tg "⬆️ *[$SYSTEM_NAME]* AdGuard VPN CLI сообщает о доступном обновлении:
+
+$ADG_UPDATE_NOTICE"
+        log_message "AdGuard VPN CLI update notification sent." "REPORT"
+    fi
 fi
 
 # === 3. БЛОК ОТПРАВКИ НА EMAIL ===

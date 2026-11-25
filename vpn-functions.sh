@@ -79,6 +79,26 @@ telegram_api_curl() {
     curl --config <(printf 'url = "https://api.telegram.org/bot%s/%s"\n' "$TG_TOKEN" "$endpoint") "$@"
 }
 
+extract_adguard_update_notice() {
+    local line clean_line
+
+    while IFS= read -r line; do
+        clean_line=$(printf '%s\n' "$line" |
+            sed -E $'s/\x1b\\[[0-9;]*[[:alpha:]]//g; s/\r$//; s/^[[:space:]]+//; s/[[:space:]]+$//')
+        [[ -n "$clean_line" ]] || continue
+        if printf '%s\n' "$clean_line" |
+            grep -qiE 'no (new )?(version|update).*available|not available|up[- ]to[- ]date|обновлен.*не.*доступн|не.*доступн.*обновлен|обновлен(ий|ия|ий нет)|нет .*обновлен'; then
+            continue
+        fi
+        if printf '%s\n' "$clean_line" |
+            grep -qiE 'new.*version.*available|version.*available|update.*available|available.*update|нов.*верс.*доступ|доступн.*обновлен|обновлен.*доступн'; then
+            printf '%s\n' "$clean_line"
+            return 0
+        fi
+    done
+    return 1
+}
+
 ensure_private_directory() {
     local directory="${1:-}"
     local expected_owner="${2:-}"
