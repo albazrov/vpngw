@@ -1,0 +1,13 @@
+# Root-owned configuration template; deployment installs it as /etc/vpngw-speed-tests.conf.
+VPN_SPEED_TEST_IDS=(cloudflare)
+VPN_SPEED_TEST_NAMES[cloudflare]="Cloudflare"
+VPN_SPEED_TEST_URLS[cloudflare]="https://speed.cloudflare.com/__down?bytes=10485760"
+VPN_SPEED_TEST_CONNECT_TIMEOUT[cloudflare]=6
+VPN_SPEED_TEST_MAX_TIME[cloudflare]=20
+
+# Add alternatives as separate IDs, for example:
+# VPN_SPEED_TEST_IDS+=(provider_name)
+# VPN_SPEED_TEST_NAMES[provider_name]="Provider name"
+# VPN_SPEED_TEST_URLS[provider_name]="https://provider.example/test-file"
+# VPN_SPEED_TEST_CONNECT_TIMEOUT[provider_name]=8
+# VPN_SPEED_TEST_MAX_TIME[provider_name]=30
