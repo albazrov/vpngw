@@ -53,8 +53,7 @@ jobs:
       - name: ShellCheck lint
         if: steps.shell_files.outputs.count != '0'
         run: |
-          # The legacy shell Telegram bot is unsupported by the Python release.
-          mapfile -d '' files < <(find . -type f -name '*.sh' ! -path './vpn-tg-bot.sh' -print0)
+          mapfile -d '' files < <(find . -type f -name '*.sh' -print0)
           for f in "${files[@]}"; do
             echo "shellcheck $f"
             shellcheck -x "$f"
@@ -82,6 +81,7 @@ jobs:
           bash tests/test_runtime_directory_permissions.sh
           bash tests/test_speed_test_http_status.sh
           bash tests/test_vpn_runtime_locks.sh
+          bash tests/test_adguard_update_notice.sh
 
       - name: Run Python bot tests
         run: python -m pytest -q python_bot/tests
@@ -114,6 +114,7 @@ jobs:
 
   final-check:
     name: Final PR gate
+    if: ${{ always() }}
     needs:
       - lint-shell
       - unit-tests
@@ -123,6 +124,13 @@ jobs:
     steps:
       - name: Validate all jobs succeeded
         run: |
+          if [[ "${{ needs.lint-shell.result }}" != "success" ]] ||
+             [[ "${{ needs.unit-tests.result }}" != "success" ]] ||
+             [[ "${{ needs.smoke-tests.result }}" != "success" ]] ||
+             [[ "${{ needs.integration-tests.result }}" != "success" ]]; then
+            echo "One or more validation jobs failed."
+            exit 1
+          fi
           echo "All validation jobs passed. PR can proceed to review and merge workflow."
 
       - name: Comment on success

@@ -7,6 +7,9 @@ source "$ROOT_DIR/vpn-functions.sh"
 TEST_DIR=$(mktemp -d)
 trap 'rm -rf "$TEST_DIR"' EXIT
 
+STATS_DIR="$TEST_DIR"
+ensure_stats_dir() { [[ "$STATS_DIR" == "$TEST_DIR" && -d "$STATS_DIR" ]]; }
+
 cat > "$TEST_DIR/adguard-cli" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" > "$CAPTURE_FILE"
@@ -28,6 +31,40 @@ export PATH="$TEST_DIR:$PATH"
 
 run_adguard_connect "DE"
 [[ "$(<"$CAPTURE_FILE")" == "connect -l DE" ]]
+
+(
+    acquire_vpn_switch_lock
+    touch "$TEST_DIR/switch-held"
+    while [[ ! -e "$TEST_DIR/release-switch" ]]; do
+        sleep 0.02
+    done
+) &
+lock_holder=$!
+lock_ready=false
+for _ in {1..50}; do
+    if [[ -e "$TEST_DIR/switch-held" ]]; then
+        lock_ready=true
+        break
+    fi
+    sleep 0.02
+done
+if [[ "$lock_ready" != true ]]; then
+    touch "$TEST_DIR/release-switch"
+    wait "$lock_holder"
+    printf 'Timed out waiting for VPN switch lock holder\n' >&2
+    exit 1
+fi
+
+if run_adguard_connect "FI"; then
+    touch "$TEST_DIR/release-switch"
+    printf 'Expected an already held VPN switch lock to reject connect\n' >&2
+    exit 1
+else
+    result=$?
+fi
+touch "$TEST_DIR/release-switch"
+wait "$lock_holder"
+[[ "$result" -eq 75 ]]
 
 export FAKE_EXIT_CODE=7
 if run_adguard_connect "FI"; then

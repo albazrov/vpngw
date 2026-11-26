@@ -1,6 +1,6 @@
 # Python Telegram bot: production runbook
 
-This runbook describes the supported Python bot release. It assumes a new Python deployment; the legacy shell Telegram bot is not a supported runtime, migration target, or rollback option. Bash remains in use for VPN, routing, and recovery helpers.
+This runbook describes the Python bot release. Bash remains in use for VPN, routing, recovery, and notification helpers.
 
 ## Runtime layout
 
@@ -53,6 +53,8 @@ sudo stat -c '%U:%G %a %n' /dev/shm/vpn_stats /var/lib/vpngw /var/lib/vpngw/bot_
 Expected: service active; runtime directory `root:root 700`; database files writable by `vpngw-bot`. For `sqlite3.OperationalError: attempt to write a readonly database`, check ownership/mode of both database files and `/var/lib/vpngw`, then rerun the deploy script. Do not delete the databases to clear the error.
 
 The runtime directory is volatile and is recreated at boot by systemd-tmpfiles. Verify it after reboot with the `stat` command above. Never use mode `0777`.
+
+The root hourly report calls `adguardvpn-cli status` with a bounded timeout. If the CLI announces a newer version, the bot receives a separate Telegram message immediately after the normal hourly report. Current-version and no-update responses do not generate a message.
 
 ## Verification
 

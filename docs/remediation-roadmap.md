@@ -1,6 +1,6 @@
 # План устранения проблем и развития Telegram-управления
 
-> Исторический backlog, составленный до текущего Python-релиза. Он не является инструкцией по миграции или запуску двух ботов. Поддерживаемый Telegram runtime — Python `vpngw-bot.service`; старый shell Telegram bot не поддерживается и не является вариантом rollback. Текущие инструкции: [Python README](../python_bot/README.md) и [production runbook](runbooks/python-bot-production.md).
+> Backlog текущих Bash-компонентов и Python `vpngw-bot.service`. Текущие инструкции: [Python README](../python_bot/README.md) и [production runbook](runbooks/python-bot-production.md).
 
 Пункты ниже сохраняют контекст аудита системных Bash-компонентов и возможных будущих улучшений. Выполненные возможности сверять с исходниками и текущим runbook, а не считать все пункты открытыми задачами.
 
@@ -8,7 +8,8 @@
 
 - Каждая задача ниже рассчитана на отдельную небольшую feature/fix ветку от `dev` и отдельный PR в `dev`; не объединять независимые исправления.
 - Следовать [процессу разработки, тестирования и выпуска](dev-to-test-pr-process.md) и [чек-листу после замечаний](developer-pr-fix-checklist.md): локальная работа на любом устройстве, PR в `dev`, затем `dev → test`, Docker test deployment на Raspberry Pi и только после отдельного sign-off PR `test → main`.
-- Для изменённых shell-скриптов запускать `bash -n` и ShellCheck; добавить поведенческий тест или smoke-check для изменённого сценария. Не считать текущие placeholder unit/smoke/integration jobs реальными проверками.
+- Для изменённых shell-скриптов запускать `bash -n` и ShellCheck; добавить поведенческий тест или smoke-check для изменённого сценария. Unit job выполняет shell regression tests и Python pytest; только smoke/integration jobs пока остаются placeholder-проверками.
+- Новая диагностика CLI/status должна иметь parser-тесты для положительного и отрицательного вывода, включая ANSI-последовательности. Hourly report не должен смешивать отдельное update-уведомление с основным отчётом.
 - Агенту поручается только указанная задача: сохранить публичные интерфейсы, не менять несвязанные файлы, не добавлять произвольное выполнение shell-команд из Telegram и не сообщать об успехе без проверки результата.
 - Перед изменением расписания или запуска на устройстве инвентаризировать действующую конфигурацию: `/etc/vpn-gw.conf`, cron, systemd, права и пути. Эти детали отсутствуют в репозитории.
 - Dockerfile/Compose и deployment automation в репозитории пока отсутствуют. Не считать тестовую среду готовой, пока контейнерная изоляция от production routes/firewall не проверена на Raspberry Pi.
@@ -33,11 +34,11 @@
 ### 0.1 Использовать настроенный AdGuard CLI
 
 - Связь: F-01.
-- Задача: исправить вызов `ADG_BIN`, обработать ненулевой exit code и отсутствие исполняемого файла; добавить проверку с fake CLI.
+- В Python runtime проверять `vpngw_bot/adapter.py`, `run_adguard_connect` и root helper.
 - Готово, когда: fake CLI получает `connect -l <ISO>`; ошибка запуска/команды не приводит к ветке проверки успеха.
 - Статус: [ ] PR/коммит: ____ Проверки: ____
-- **Промт агенту:** «Исправь вызов AdGuard CLI в `vpn-tg-bot.sh`: используй настроенный исполняемый путь, обработай ошибку команды и добавь тест с fake CLI. Не меняй другие операции; выполни `bash -n`, ShellCheck и тест.»
-- Runbook: [развёртывание, проверка и откат задачи 0.1](runbooks/0.1-adguard-cli.md).
+- **Промт агенту:** «Проверь Python switch path через `vpngw_bot/adapter.py` и root helper: используй настроенный исполняемый путь, обработай ошибку команды и добавь тест с fake CLI. Выполни `bash -n`, ShellCheck и тест.»
+- Runbook: [production deployment Python-бота](runbooks/python-bot-production.md).
 - Последний production snapshot 2026-10-31 23:42: bot unit active, `tun0` present, IPv4 forwarding=1; оба изменяемых скрипта теперь `root:root 755`, backups найдены. Но source checkout был dirty, fake CLI test не запускался, token всё ещё в argv, reconnect/rollback tests не выполнялись. Не считать задачу закрытой и не повторять deployment до закрытия F-12/F-14.
 
 ### 0.2 Проверять фактически подключённую локацию
@@ -148,7 +149,7 @@
 - Поддерживаемый runtime: `vpngw-bot.service`, Python `python-telegram-bot`, service user `vpngw-bot`.
 - Реализованы `/start`, `/menu`, `/status`, `/speed`, admin-only `/speedadd`, кнопки переключения `RO`/`DE`/`FI`, SQLite state и безопасный allowlist root-helper.
 - Долгие status/speed/connect действия выполняются вне event loop; пользователь видит сообщение о процессе и результат.
-- Старый shell Telegram bot не используется как параллельный consumer, миграционный этап или rollback. Bash scripts остаются только системными VPN/routing/recovery helpers.
+- Bash scripts остаются системными VPN/routing/recovery/notification helpers; Telegram polling выполняется только Python service.
 - Проверки и эксплуатация описаны в [Python production runbook](runbooks/python-bot-production.md); актуальный кодовый контракт — в [Python README](../python_bot/README.md).
 
 ## Этап 3. Сохранить корректность сетевой диагностики и IP-базы
@@ -181,7 +182,7 @@
 
 ## Этап 4. Возможные расширения Python-бота
 
-Это backlog дополнительных функций, не требования для текущего релиза. Уже доступны `/start`, `/menu`, `/status`, `/speed`, admin `/speedadd` и фиксированное переключение `RO`/`DE`/`FI`. Новые возможности добавлять непосредственно в Python service через существующий adapter; старый shell Telegram bot и миграционный parity не используются.
+Это backlog дополнительных функций, не требования для текущего релиза. Уже доступны `/start`, `/menu`, `/status`, `/speed`, admin `/speedadd` и фиксированное переключение `RO`/`DE`/`FI`. Новые возможности добавлять непосредственно в Python service через существующий adapter.
 
 ### 4.1 Расширить системную сводку состояния
 
@@ -307,7 +308,7 @@
 6. Этап 2.5 завершён для текущего набора команд; дальнейшие Telegram-функции добавляются непосредственно в Python service через фиксированный adapter contract, без shell-bot parity или parallel polling.
 7. Для R-01 выполнить 4.7 до кода probe, затем 4.8 → 4.9 → 4.10; не допускать probe к основному туннелю до доказательства изоляции.
 8. Этап 4.6 и 5.2: настройка/проверка запуска только с данными реального устройства, затем staged rollout.
-9. Этапы 5.3 → 5.5 относятся к отдельному test/prod release process; они не предполагают запуск legacy shell bot или миграционную схему.
+9. Этапы 5.3 → 5.5 относятся к отдельному test/prod release process.
 
 ## Definition of Done для каждого PR
 

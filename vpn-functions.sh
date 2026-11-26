@@ -31,6 +31,7 @@ acquire_vpn_switch_lock() {
 
 run_adguard_connect() {
     local location="${1:-}"
+    local connect_status
 
     if [ -z "$location" ]; then
         return 2
@@ -48,12 +49,17 @@ run_adguard_connect() {
         return $?
     fi
 
+    acquire_vpn_switch_lock || return $?
+
     if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
         sudo -n -- "$ADG_BIN" connect -l "$location" >/dev/null 2>&1
-        return $?
+        connect_status=$?
+    else
+        "$ADG_BIN" connect -l "$location" >/dev/null 2>&1
+        connect_status=$?
     fi
-
-    "$ADG_BIN" connect -l "$location" >/dev/null 2>&1
+    exec 8>&-
+    return "$connect_status"
 }
 
 telegram_api_curl() {
@@ -71,6 +77,26 @@ telegram_api_curl() {
 
     export -n TG_TOKEN 2>/dev/null || true
     curl --config <(printf 'url = "https://api.telegram.org/bot%s/%s"\n' "$TG_TOKEN" "$endpoint") "$@"
+}
+
+extract_adguard_update_notice() {
+    local line clean_line
+
+    while IFS= read -r line; do
+        clean_line=$(printf '%s\n' "$line" |
+            sed -E $'s/\x1b\\[[0-9;]*[[:alpha:]]//g; s/\r$//; s/^[[:space:]]+//; s/[[:space:]]+$//')
+        [[ -n "$clean_line" ]] || continue
+        if printf '%s\n' "$clean_line" |
+            grep -qiE 'no (new )?(version|update).*available|not available|up[- ]to[- ]date|обновлен.*не.*доступн|не.*доступн.*обновлен|обновлен(ий|ия|ий нет)|нет .*обновлен'; then
+            continue
+        fi
+        if printf '%s\n' "$clean_line" |
+            grep -qiE 'new.*version.*available|version.*available|update.*available|available.*update|нов.*верс.*доступ|доступн.*обновлен|обновлен.*доступн'; then
+            printf '%s\n' "$clean_line"
+            return 0
+        fi
+    done
+    return 1
 }
 
 ensure_private_directory() {
@@ -119,7 +145,7 @@ check_vpn_connectivity() {
 
     # Цикл проверки хостов
     for target in "${targets[@]}"; do
-        if curl -s --interface "$interface" --connect-timeout 5 "$target" >/dev/null; then
+        if curl -s --interface "$interface" --connect-timeout 5 --max-time 10 "$target" >/dev/null; then
             return 0 # Успех: хотя бы один хост ответил
         fi
     done

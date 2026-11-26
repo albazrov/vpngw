@@ -21,16 +21,27 @@ export CLR_RST=""
 (
     acquire_vpn_switch_lock
     printf 'locked\n' > "$TEST_DIR/locked"
-    sleep 1
+    while [[ ! -e "$TEST_DIR/release-lock" ]]; do
+        sleep 0.02
+    done
 ) &
 holder_pid=$!
 
+ready=false
 for _ in {1..50}; do
-    [[ -f "$TEST_DIR/locked" ]] && break
+    if [[ -f "$TEST_DIR/locked" ]]; then
+        ready=true
+        break
+    fi
     sleep 0.02
 done
+[[ "$ready" == true ]] || {
+    printf 'Timed out waiting for VPN lock holder\n' >&2
+    exit 1
+}
 
 if acquire_vpn_switch_lock; then
+    touch "$TEST_DIR/release-lock"
     printf 'Expected a concurrent VPN switch to be rejected\n' >&2
     exit 1
 else
@@ -38,6 +49,7 @@ else
     [[ "$result" -eq 75 ]]
 fi
 
+touch "$TEST_DIR/release-lock"
 wait "$holder_pid"
 acquire_vpn_switch_lock
 exec 8>&-

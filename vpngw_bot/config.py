@@ -33,6 +33,10 @@ class BotConfig:
                     parsed.append(int(value))
                 except ValueError as exc:
                     raise ValueError(f"Invalid {variable} value: {value!r}") from exc
+                if int(value) <= 0:
+                    raise ValueError(
+                        f"{variable} must contain only positive private-chat IDs"
+                    )
             return tuple(parsed)
 
         chat_ids = parse_ids(raw_ids, "TG_ALLOWED_CHAT_IDS")

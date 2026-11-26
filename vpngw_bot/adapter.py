@@ -15,6 +15,7 @@ ALLOWED_LOCATIONS = {"RO", "DE", "FI"}
 SPEED_PROFILE_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
 SPEED_PROFILE_NAME_PATTERN = re.compile(r"^[^|\r\n]{1,32}$")
 HOSTNAME_PATTERN = re.compile(r"^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$")
+CONNECT_TIMEOUT_SECONDS = 120
 
 
 class AdapterError(ValueError):
@@ -236,7 +237,18 @@ else
     exit 127
 fi
 '''
-            result = subprocess.run(["/bin/bash", "-lc", script], capture_output=True, text=True, check=False)
+            try:
+                result = subprocess.run(
+                    ["/bin/bash", "-lc", script],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=CONNECT_TIMEOUT_SECONDS,
+                )
+            except subprocess.TimeoutExpired as exc:
+                raise AdapterError(
+                    f"connect command timed out after {CONNECT_TIMEOUT_SECONDS}s"
+                ) from exc
             if result.returncode != 0:
                 raise AdapterError(f"connect command failed: {result.stderr.strip() or result.stdout.strip() or 'unknown error'}")
             return result.stdout.strip()

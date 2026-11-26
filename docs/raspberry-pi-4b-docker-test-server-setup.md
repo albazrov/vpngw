@@ -6,7 +6,7 @@
 
 **Критически важно:** Docker на Linux-хосте не гарантирует отсутствие влияния на сеть хоста. Docker Engine создаёт firewall rules для bridge-сетей и может менять параметры IP forwarding/forward policy. На этом Raspberry Pi уже работает VPN-шлюз с policy routing и iptables. Поэтому безопасный рекомендуемый вариант для теста реального VPN-туннеля — отдельный Raspberry Pi 4B/VM или другой отдельный тестовый узел.
 
-На том же Pi допустимы только mock/unit-тесты без host networking, TUN и доступа к host routes/firewall, пока отдельный эксперимент не доказал изоляцию конкретного реального VPN-сценария. Если условие «не затрагивать основную маршрутизацию» является абсолютным, не запускайте реальный VPN-probe на production-шлюзе.
+На том же Pi допустимы только ранее согласованные mock/unit-тесты без host networking, TUN, записи в host routes/firewall/services и доступа к production credentials. Реальные integration/VPN-тесты допускаются только после доказанной изоляции на отдельном узле. Если условие «не затрагивать основную маршрутизацию» является абсолютным, не запускайте реальный VPN-probe на production-шлюзе.
 
 Docker Engine управляет firewall rules; нельзя «решить» это настройкой `iptables: false`: официальная документация предупреждает, что это ломает bridge networking и может открыть доступ к опубликованным портам. Отключение firewall-управления Docker не является рекомендуемой конфигурацией.
 
@@ -69,7 +69,7 @@ sudo nft list ruleset
 
 **Остановиться и не продолжать установку на production Pi**, если нет локальной консоли/резервного доступа, неизвестно как восстановить firewall, Docker уже используется production-процессами или невозможно выделить maintenance window. Подготовить Docker на отдельном test-устройстве.
 
-Актуальный production inventory уже подтвердил Docker Engine/Compose и работающий контейнер Gitea на этом Pi. Это не чистый Docker test host: не переустанавливать/не перезапускать daemon, не менять его `daemon.json`, не выполнять prune/cleanup и не создавать test networks на production host как часть подготовки. Для интеграционного/VPN test использовать отдельный Raspberry Pi/VM; на production узле допустимы только уже согласованные read-only проверки.
+Актуальный production inventory уже подтвердил Docker Engine/Compose и работающий контейнер Gitea на этом Pi. Это не чистый Docker test host: не переустанавливать/не перезапускать daemon, не менять его `daemon.json`, не выполнять prune/cleanup и не создавать test networks на production host как часть подготовки. Для интеграционного/VPN test использовать отдельную Raspberry Pi/VM. На production узле допустимы только согласованные read-only проверки и изолированные mock/unit-тесты, не использующие host networking, TUN, privileged helpers или production credentials.
 
 ## 4. Проверить ОС и архитектуру Raspberry Pi
 
