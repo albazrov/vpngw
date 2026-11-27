@@ -54,6 +54,11 @@ export FAKE_INTERFACE_AVAILABLE_AFTER=2
 export FAKE_CURL_COUNT_FILE="$TEST_DIR/curl-count"
 export FAKE_CURL_SUCCESS_AFTER=1
 check_vpn_connectivity tun0
+interface_checks=$(<"$FAKE_INTERFACE_COUNT_FILE")
+if (( interface_checks < 2 )); then
+    printf 'Expected transient interface to be checked again before VPN probing succeeded\n' >&2
+    exit 1
+fi
 
 echo 0 > "$TEST_DIR/curl-count"
 export FAKE_CURL_SUCCESS_AFTER=99
