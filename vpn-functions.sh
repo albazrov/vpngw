@@ -9,6 +9,121 @@
 
 # Библиотека общих функций для управления VPN
 
+acquire_vpn_switch_lock() {
+    local lock_file
+
+    ensure_stats_dir || {
+        printf 'Unsafe or missing stats directory: %s (expected root:root 0700)\n' \
+            "${STATS_DIR:-unset}" >&2
+        return 1
+    }
+
+    lock_file="$STATS_DIR/vpn-switch.lock"
+    exec 8>"$lock_file" || {
+        printf 'Unable to open VPN switch lock: %s\n' "$lock_file" >&2
+        return 1
+    }
+    if ! flock -n 8; then
+        printf 'VPN switch already in progress\n' >&2
+        return 75
+    fi
+}
+
+run_adguard_connect() {
+    local location="${1:-}"
+    local connect_status
+
+    if [ -z "$location" ]; then
+        return 2
+    fi
+
+    if [ -z "${ADG_BIN:-}" ] || ! command -v "$ADG_BIN" >/dev/null 2>&1; then
+        return 127
+    fi
+
+    if [ "$(id -u)" -ne 0 ] && [ -n "${VPNGW_SWITCH_BIN:-}" ]; then
+        if ! command -v "$VPNGW_SWITCH_BIN" >/dev/null 2>&1 || ! command -v sudo >/dev/null 2>&1; then
+            return 127
+        fi
+        sudo -n -- "$VPNGW_SWITCH_BIN" "$location"
+        return $?
+    fi
+
+    acquire_vpn_switch_lock || return $?
+
+    if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+        sudo -n -- "$ADG_BIN" connect -l "$location" >/dev/null 2>&1
+        connect_status=$?
+    else
+        "$ADG_BIN" connect -l "$location" >/dev/null 2>&1
+        connect_status=$?
+    fi
+    exec 8>&-
+    return "$connect_status"
+}
+
+telegram_api_curl() {
+    local endpoint="${1:-}"
+    shift || return 2
+
+    case "$endpoint" in
+        getUpdates|sendMessage|answerCallbackQuery) ;;
+        *) return 2 ;;
+    esac
+
+    if [[ ! "${TG_TOKEN:-}" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]]; then
+        return 78
+    fi
+
+    export -n TG_TOKEN 2>/dev/null || true
+    curl --config <(printf 'url = "https://api.telegram.org/bot%s/%s"\n' "$TG_TOKEN" "$endpoint") "$@"
+}
+
+extract_adguard_update_notice() {
+    local line clean_line
+
+    while IFS= read -r line; do
+        clean_line=$(printf '%s\n' "$line" |
+            sed -E $'s/\x1b\\[[0-9;]*[[:alpha:]]//g; s/\r$//; s/^[[:space:]]+//; s/[[:space:]]+$//')
+        [[ -n "$clean_line" ]] || continue
+        if printf '%s\n' "$clean_line" |
+            grep -qiE 'no (new )?(version|update).*available|not available|up[- ]to[- ]date|обновлен.*не.*доступн|не.*доступн.*обновлен|обновлен(ий|ия|ий нет)|нет .*обновлен'; then
+            continue
+        fi
+        if printf '%s\n' "$clean_line" |
+            grep -qiE 'new.*version.*available|version.*available|update.*available|available.*update|нов.*верс.*доступ|доступн.*обновлен|обновлен.*доступн'; then
+            printf '%s\n' "$clean_line"
+            return 0
+        fi
+    done
+    return 1
+}
+
+ensure_private_directory() {
+    local directory="${1:-}"
+    local expected_owner="${2:-}"
+    local expected_group="${3:-}"
+    local expected_mode="${4:-}"
+    local actual
+
+    if [[ -z "$directory" || -z "$expected_owner" || -z "$expected_group" || -z "$expected_mode" ]]; then
+        return 2
+    fi
+    if [[ ! -d "$directory" || -L "$directory" ]]; then
+        return 1
+    fi
+
+    actual=$(stat -c '%u:%g:%a' -- "$directory") || return 1
+    [[ "$actual" == "$expected_owner:$expected_group:$expected_mode" ]]
+}
+
+ensure_stats_dir() {
+    if [[ "${STATS_DIR:-}" != "/dev/shm/vpn_stats" ]]; then
+        return 2
+    fi
+    ensure_private_directory "$STATS_DIR" 0 0 700
+}
+
 check_vpn_connectivity() {
     # Функция принимает один аргумент — имя интерфейса
     local interface="$1"
@@ -30,7 +145,7 @@ check_vpn_connectivity() {
 
     # Цикл проверки хостов
     for target in "${targets[@]}"; do
-        if curl -s --interface "$interface" --connect-timeout 5 "$target" >/dev/null; then
+        if curl -s --interface "$interface" --connect-timeout 5 --max-time 10 "$target" >/dev/null; then
             return 0 # Успех: хотя бы один хост ответил
         fi
     done
@@ -41,8 +156,45 @@ check_vpn_connectivity() {
 
 # ПРОВЕРКА СКОРОСТИ КАНАЛА 
 
+list_vpn_speed_tests() {
+    local config_file="${VPNGW_SPEED_CONFIG:-$(dirname -- "${BASH_SOURCE[0]}")/vpn-speed-tests.conf}"
+    local -a VPN_SPEED_TEST_IDS=()
+    local -A VPN_SPEED_TEST_NAMES=()
+    local -A VPN_SPEED_TEST_URLS=()
+    local -A VPN_SPEED_TEST_CONNECT_TIMEOUT=()
+    local -A VPN_SPEED_TEST_MAX_TIME=()
+
+    if [ ! -r "$config_file" ]; then
+        echo "Speed test config is not readable: $config_file" >&2
+        return 1
+    fi
+    # shellcheck disable=SC1090
+    source "$config_file"
+
+    local profile profile_url connect_timeout max_time
+    for profile in "${VPN_SPEED_TEST_IDS[@]}"; do
+        profile_url="${VPN_SPEED_TEST_URLS[$profile]:-}"
+        connect_timeout="${VPN_SPEED_TEST_CONNECT_TIMEOUT[$profile]:-6}"
+        max_time="${VPN_SPEED_TEST_MAX_TIME[$profile]:-20}"
+        if [[ "$profile" =~ ^[a-zA-Z0-9_-]+$ ]] &&
+            [ -n "${VPN_SPEED_TEST_NAMES[$profile]:-}" ] &&
+            [[ "$profile_url" == https://* ]] &&
+            [[ "$connect_timeout" =~ ^[1-9][0-9]?$ ]] &&
+            [[ "$max_time" =~ ^[1-9][0-9]{0,2}$ ]] &&
+            (( connect_timeout <= 60 && max_time <= 120 )); then
+            printf '%s|%s\n' "$profile" "${VPN_SPEED_TEST_NAMES[$profile]}"
+        fi
+    done
+}
+
 get_vpn_download_speed() {
     local interface="$1"
+    local profile="${2:-}"
+    local override_url="${3:-}"
+    local override_connect_timeout="${4:-}"
+    local override_max_time="${5:-}"
+    local resolve_host="${6:-}"
+    local resolve_ip="${7:-}"
     
     # 1. Защита от пустого интерфейса
     if [ -z "$interface" ]; then
@@ -50,21 +202,61 @@ get_vpn_download_speed() {
         return 2
     fi
 
-    # 2. Ссылка на тестовый файл (используем стабильный CDN от Cloudflare/Yandex)
-    # Файл размером 10-20 МБ оптимален, чтобы замер был точным и не забивал канал надолго
-    local test_url="http://speedtest.tele2.net/5MB.zip" 
+    local test_url connect_timeout max_time
+    if [ -n "$override_url" ]; then
+        test_url="$override_url"
+        connect_timeout="$override_connect_timeout"
+        max_time="$override_max_time"
+    else
+        local config_file="${VPNGW_SPEED_CONFIG:-$(dirname -- "${BASH_SOURCE[0]}")/vpn-speed-tests.conf}"
+        local -a VPN_SPEED_TEST_IDS=()
+        local -A VPN_SPEED_TEST_NAMES=()
+        local -A VPN_SPEED_TEST_URLS=()
+        local -A VPN_SPEED_TEST_CONNECT_TIMEOUT=()
+        local -A VPN_SPEED_TEST_MAX_TIME=()
+
+        if [ ! -r "$config_file" ]; then
+            echo "0"
+            return 1
+        fi
+        # shellcheck disable=SC1090
+        source "$config_file"
+
+        if [ -z "$profile" ]; then
+            profile="${VPN_SPEED_TEST_IDS[0]:-}"
+        fi
+        if [[ ! "$profile" =~ ^[a-zA-Z0-9_-]+$ ]] || [ -z "${VPN_SPEED_TEST_URLS[$profile]:-}" ]; then
+            echo "0"
+            return 1
+        fi
+
+        test_url="${VPN_SPEED_TEST_URLS[$profile]}"
+        connect_timeout="${VPN_SPEED_TEST_CONNECT_TIMEOUT[$profile]:-6}"
+        max_time="${VPN_SPEED_TEST_MAX_TIME[$profile]:-20}"
+    fi
+    if [[ "$test_url" != https://* ]] || [[ ! "$connect_timeout" =~ ^[1-9][0-9]?$ ]] ||
+        [[ ! "$max_time" =~ ^[1-9][0-9]{0,2}$ ]] || (( connect_timeout > 60 || max_time > 120 )); then
+        echo "0"
+        return 1
+    fi
 
     # 3. Делаем замер скорости через curl
     # -w "%{speed_download}" возвращает среднюю скорость в байтах в секунду
-    # -m 20 ограничивает максимальное время теста 20 секундами (на случай медленного линка)
-    # -k игнорировать проблемы SSL
-    # -4 принудительно IPv4, -s-S скроет прогресс-бар но покажет ошибки сети
+    # Таймауты и URL берутся из отдельного root-owned конфигурационного файла
 
-    local speed_bytes
-    speed_bytes=$(curl -s -S -4 -k -L --interface "$interface" --connect-timeout 6 -m 20 "$test_url" -o /dev/null -w "%{speed_download}")
+    local -a curl_args=(-s -S -4 --proto '=https' --interface "$interface" --connect-timeout "$connect_timeout" --max-time "$max_time")
+    if [ -n "$resolve_host" ] && [ -n "$resolve_ip" ]; then
+        curl_args+=(--resolve "$resolve_host:443:$resolve_ip")
+    fi
+    local speed_result speed_bytes http_code curl_status
+    speed_result=$(curl "${curl_args[@]}" "$test_url" -o /dev/null -w "%{speed_download}|%{http_code}")
+    curl_status=$?
+    speed_bytes="${speed_result%|*}"
+    http_code="${speed_result##*|}"
 
-    # Если curl завершился с ошибкой или вернул 0
-    if [ $? -ne 0 ] || [ -z "$speed_bytes" ] || [ "${speed_bytes%.*}" -eq 0 ]; then
+    # Redirect/error responses are not valid download measurements.
+    if [ "$curl_status" -ne 0 ] || [[ ! "$http_code" =~ ^2[0-9][0-9]$ ]] ||
+        [ -z "$speed_bytes" ] || [ "${speed_bytes%.*}" -eq 0 ]; then
         echo "0"
         return 1
     fi
@@ -83,6 +275,7 @@ get_vpn_download_speed() {
 
 check_geo() {
     local interface="$1"
+    local detail="${2:-}"
     
     # Защита от пустого интерфейса
     if [ -z "$interface" ]; then
@@ -91,15 +284,21 @@ check_geo() {
 
     # Выполняем запрос через указанный интерфейс
     local geo_raw
-    geo_raw=$(timeout 15s curl -sL --interface "$interface" "http://ip-api.com/line/?fields=status,countryCode,query" | tr -d '\r')
+    geo_raw=$(timeout 15s curl -sL --interface "$interface" "http://ip-api.com/line/?fields=status,countryCode,city,query" | tr -d '\r')
     
     local g_status
     g_status=$(echo "$geo_raw" | sed -n '1p')
     local g_country
     g_country=$(echo "$geo_raw" | sed -n '2p' | tr '[:lower:]' '[:upper:]')
+    local g_city
+    g_city=$(echo "$geo_raw" | sed -n '3p')
 
     if [ "$g_status" = "success" ] && [ -n "$g_country" ]; then
-        echo "$g_country"
+        if [ "$detail" = "detail" ] && [ -n "$g_city" ]; then
+            printf '%s|%s\n' "$g_country" "$g_city"
+        else
+            echo "$g_country"
+        fi
         return 0
     fi
     
@@ -113,6 +312,12 @@ check_geo() {
 log_message() {
     local msg="$1"
     local tag="${2:-SYSTEM}" # Если второй параметр не передан, будет [SYSTEM]
+    local log_fd
+
+    if ! ensure_stats_dir; then
+        printf 'Unsafe or missing stats directory: %s (expected root:root 0700)\n' "${STATS_DIR:-unset}" >&2
+        return 1
+    fi
     
     # Раскрашиваем тег в зависимости от его имени (для удобства чтения)
     local tag_color="$CLR_CYN"
@@ -120,16 +325,55 @@ log_message() {
     [[ "$tag" == "STARTER" ]] && tag_color="$CLR_YLW"
     [[ "$tag" == "MONITOR" ]] && tag_color="$CLR_RED"
 
-    # Пишем в лог: [ТЕГ] сообщение (с включенным -e для обработки цветов)
-    echo -e "$(date '+%Y-%m-%d %H:%M:%S') - ${tag_color}[$tag]${CLR_RST} $msg" >> "$LOG_RAM"
+    exec {log_fd}>"$STATS_DIR/vpn-log.lock" || return 1
+    flock "$log_fd" || return 1
+    if ! printf '%b\n' "$(date '+%Y-%m-%d %H:%M:%S') - ${tag_color}[$tag]${CLR_RST} $msg" >> "$LOG_RAM"; then
+        exec {log_fd}>&-
+        return 1
+    fi
+    exec {log_fd}>&-
+}
+
+flush_vpn_log() {
+    local log_fd log_size
+
+    if ! ensure_stats_dir; then
+        printf 'Unsafe or missing stats directory: %s (expected root:root 0700)\n' "${STATS_DIR:-unset}" >&2
+        return 1
+    fi
+    if [[ -z "${LOG_RAM:-}" || -z "${LOG_DISK:-}" ]]; then
+        printf 'LOG_RAM and LOG_DISK must be configured\n' >&2
+        return 1
+    fi
+
+    exec {log_fd}>"$STATS_DIR/vpn-log.lock" || return 1
+    flock "$log_fd" || return 1
+    if [[ -s "$LOG_RAM" ]]; then
+        if ! cat "$LOG_RAM" >> "$LOG_DISK" || ! : > "$LOG_RAM"; then
+            exec {log_fd}>&-
+            return 1
+        fi
+        log_size=$(stat -c%s "$LOG_DISK") || {
+            exec {log_fd}>&-
+            return 1
+        }
+        if (( log_size > 2097152 )); then
+            if ! mv -f "$LOG_DISK" "${LOG_DISK}.1" || ! : > "$LOG_DISK"; then
+                exec {log_fd}>&-
+                return 1
+            fi
+        fi
+    fi
+    exec {log_fd}>&-
 }
 
 # --- СТАТИСТИКА И УВЕДОМЛЕНИЯ ---
 
 inc_stat() {
     local file="$STATS_DIR/$1"
-    mkdir -p "$STATS_DIR"
-    local val=$(cat "$file" 2>/dev/null || echo 0)
+    ensure_stats_dir || return $?
+    local val
+    val=$(cat "$file" 2>/dev/null || echo 0)
     echo $((val + 1)) > "$file"
 }
 
@@ -150,7 +394,8 @@ check_state_change() {
     local alert_msg_fail="$4"
     local state_file="$STATS_DIR/last_$state_name"
     
-    local old_val=$(cat "$state_file" 2>/dev/null || echo 1)
+    local old_val
+    old_val=$(cat "$state_file" 2>/dev/null || echo 1)
     
     if [[ "$old_val" == "1" && "$current_val" == "0" ]]; then
         [ -n "$alert_msg_fail" ] && send_alert "CRITICAL" "$alert_msg_fail"
@@ -174,7 +419,8 @@ send_tg() {
 
 check_hw_health() {
     local tag="${1:-SYSTEM}"
-    local cpu_temp=$("$MAIN_SH_DIR/vpn-hw-check.sh")
+    local cpu_temp
+    cpu_temp=$("$MAIN_SH_DIR/vpn-hw-check.sh")
     local limit=${TEMP_LIMIT:-75}
 
     # Если температура 0 или пустая — значит ошибка чтения
@@ -190,11 +436,12 @@ check_hw_health() {
 check_temp_health() {
     # 1. Получаем температуру и очищаем от всего, кроме цифр
     
-    local cpu_temp=$("$MAIN_SH_DIR/vpn-hw-check.sh")
+    local cpu_temp
+    cpu_temp=$("$MAIN_SH_DIR/vpn-hw-check.sh")
     
     # 2. Берем лимит из конфига или ставим 75 по умолчанию
     local limit=${TEMP_LIMIT:-75}
-    debug_log "[DEBUG] Raw Temp: $raw_temp | Parsed: $cpu_temp | Limit: $limit"
+    debug_log "[DEBUG] CPU temp: $cpu_temp | Limit: $limit"
 
     # 3. Проверка на валидность данных перед сравнением
     if [[ -z "$cpu_temp" || ! "$cpu_temp" =~ ^[0-9]+$ ]]; then

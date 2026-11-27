@@ -9,20 +9,21 @@
 CONF_FILE="/etc/vpn-gw.conf"
 
 if [ -f "$CONF_FILE" ]; then
+    # shellcheck disable=SC1090
     source "$CONF_FILE"
 else
     echo "[ERROR] Config file $CONF_FILE not found!" >&2
     exit 1
 fi
 
-
-if [ -s "$LOG_RAM" ]; then
-    cat "$LOG_RAM" >> "$LOG_DISK"
-    > "$LOG_RAM"
-    # Ротация архивного лога (2МБ)
-    if [ $(stat -c%s "$LOG_DISK") -gt 2097152 ]; then
-        mv "$LOG_DISK" "${LOG_DISK}.1"
-        touch "$LOG_DISK"
-    fi
+FUNCTIONS_LIB="${VPNGW_FUNCTIONS:-$MAIN_SH_DIR/vpn-functions.sh}"
+if [ -f "$FUNCTIONS_LIB" ]; then
+    # shellcheck disable=SC1090
+    source "$FUNCTIONS_LIB"
+else
+    echo "Ошибка: Библиотека функций $FUNCTIONS_LIB не найдена!" >&2
+    exit 1
 fi
+
+flush_vpn_log
 
