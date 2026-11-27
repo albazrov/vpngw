@@ -102,41 +102,45 @@ check_geo() {
 
 check_internet() {
     debug_log "Starting connectivity check..."
-    
-    # 1. Проверка физического интернета (ISP)
+
     local inet_ok=0
-    local primary_target=${CHECK_TARGETS:-8.8.8.8}
-    
-    if ping -c 1 -W 2 -I "$NET_IF" "$primary_target" >/dev/null 2>&1; then 
+    local inet_status=0
+    local vpn_status=0
+
+    check_wan_connectivity "$NET_IF"
+    inet_status=$?
+    if [[ "$inet_status" -eq 0 ]]; then
         inet_ok=1
+    elif [[ "$inet_status" -eq 2 ]]; then
+        printf 'Invalid WAN connectivity check configuration.\n' >&2
+        return 30
     fi
-    
+
     check_state_change "inet" "$inet_ok" "Связь восстановлена" "Интернет пропал на $NET_IF!"
 
-    # Если ISP лежит, выходим немедленно с кодом ошибки
     if [ "$inet_ok" -eq 0 ]; then
-        debug_log "ISP is DOWN. Skipping VPN check to save time."
-        return 1
+        debug_log "ISP is DOWN after repeated checks. Skipping VPN check."
+        return 10
     fi
 
-    # 2. Проверка туннеля VPN (только если ISP в порядке)
     local vpn_ok=0
-    if [ ! -d /sys/class/net/"$VPN_IF" ]; then
-        debug_log "VPN check: Interface $VPN_IF is MISSING"
+    check_vpn_connectivity "$VPN_IF"
+    vpn_status=$?
+    if [[ "$vpn_status" -eq 0 ]]; then
+        vpn_ok=1
+        debug_log "${CLR_GRN}VPN check SUCCESS ${CLR_RST}"
+    elif [[ "$vpn_status" -eq 2 ]]; then
+        printf 'Invalid VPN connectivity check configuration.\n' >&2
+        return 40
+    elif ip link show dev "$VPN_IF" >/dev/null 2>&1; then
+        debug_log "VPN interface is present, but repeated connectivity checks failed."
     else
-        for target in "${CHECK_TARGETS[@]}"; do
-            debug_log "Testing VPN via $target..."
-            if timeout 5s curl -sI --interface "$VPN_IF" "https://$target" > /dev/null 2>&1; then
-                vpn_ok=1
-                debug_log "${CLR_GRN}VPN check SUCCESS ${CLR_RST}via $target"
-                break
-            fi
-        done
+        debug_log "VPN interface $VPN_IF is still missing after repeated checks."
     fi
-    
+
     check_state_change "vpn" "$vpn_ok" "" "⚠️ Туннель VPN упал!"
 
-    [ "$vpn_ok" -eq 1 ] && return 0 || return 1
+    [ "$vpn_ok" -eq 1 ] && return 0 || return 20
 }
 
 # Функция сборки очереди
@@ -223,7 +227,9 @@ try_connect_queue() {
                 # Повторяем коннект, так как теперь мы авторизованы
                 $TIMEOUT_CMD /opt/adguardvpn_cli/adguardvpn-cli connect -l "$LOC" > /dev/null 2>&1 8>&-
                 sleep 20
-                if check_internet; then
+                check_internet
+                HEALTH_STATUS=$?
+                if [[ "$HEALTH_STATUS" -eq 0 ]]; then
                     # Если успех - формируем отчет и выходим (как при обычном успехе)
                     ACTUAL_ISO=$(check_geo)
                     if [[ "$ACTUAL_ISO" != "$LOC" ]]; then
@@ -299,7 +305,9 @@ if [ -f "$AUTH_FLAG" ]; then
 fi
 
 # ПЕРВАЯ И ГЛАВНАЯ ПРОВЕРКА
-if check_internet; then
+check_internet
+HEALTH_STATUS=$?
+if [[ "$HEALTH_STATUS" -eq 0 ]]; then
     # Если мы здесь, значит интернет и VPN работают. 
     # Проверяем, не висит ли флаг ожидания авторизации
     if [ -f "$AUTH_FLAG" ]; then 
@@ -310,35 +318,53 @@ if check_internet; then
 
 
     if [ "$CHECK_PRIORITY" = false ]; then
+        ACTUAL_ISO=$(check_geo 2>/dev/null || printf 'unknown')
         inc_stat "cnt_success"
         debug_log "System is ${CLR_GRN}healthy${CLR_RST}. ISO: [$ACTUAL_ISO]"
         exit 0
     fi
 fi
-# ... после того как check_internet вернул 1 ...
-# Проверяем физический линк (ISP)
-if ! ping -c 1 -W 2 -I "$NET_IF" "${CHECK_TARGETS[0]}" >/dev/null 2>&1; then
+
+if [[ "$HEALTH_STATUS" -eq 10 ]]; then
     log_message "${CLR_RED}Physical link ($NET_IF) is DOWN.${CLR_RST} Waiting for restoration..." "STARTER"
-    
+
     wait_count=0
-    max_wait=10 # Максимум 10 итераций
-    
-    while ! ping -c 1 -W 2 -I "$NET_IF" "${CHECK_TARGETS[0]}" >/dev/null 2>&1; do
+    max_wait=10
+
+    while ! check_wan_connectivity "$NET_IF"; do
         ((wait_count++))
         debug_log "${CLR_RED}ISP still DOWN.${CLR_RST} Attempt $wait_count/$max_wait. Sleeping 20s..."
         
         if [ "$wait_count" -ge "$max_wait" ]; then
             log_message "ISP wait timeout reached ($((max_wait * 20))s). ${CLR_RED}Exiting to retry by cron.${CLR_RST}" "STARTER"
             # Удаляем временные файлы, если нужно, и выходим
-            exit 1 
+            exit 1
         fi
         
         sleep 20
     done
     log_message "${CLR_GRN}Physical link is RESTORED${CLR_RST} after $((wait_count * 20))s. Proceeding to VPN recovery." "STARTER"
+
+    check_internet
+    HEALTH_STATUS=$?
+    if [[ "$HEALTH_STATUS" -eq 0 ]]; then
+        ACTUAL_ISO=$(check_geo 2>/dev/null || printf 'unknown')
+        inc_stat "cnt_success"
+        debug_log "System recovered after WAN wait. ISO: [$ACTUAL_ISO]"
+        if [ "$CHECK_PRIORITY" = false ]; then
+            exit 0
+        fi
+    fi
+    if [[ "$HEALTH_STATUS" -eq 10 ]]; then
+        debug_log "ISP became unstable again after restoration. Deferring recovery."
+        exit 1
+    fi
 fi
-# Как только интернет на eth0 появился, начинаем стандартный RECOVERY
-# --- Перед началом восстановления ---
+
+if ! connectivity_status_allows_recovery "$HEALTH_STATUS" "$CHECK_PRIORITY"; then
+    printf 'Unexpected connectivity check status: %s\n' "$HEALTH_STATUS" >&2
+    exit "$HEALTH_STATUS"
+fi
 
 # Фиксируем время, когда мы официально признали "падение"
 RECOVERY_START_TIME=$(date '+%H:%M:%S')
