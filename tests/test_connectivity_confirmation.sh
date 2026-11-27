@@ -83,4 +83,15 @@ else
 fi
 export VPNGW_CONNECTIVITY_ATTEMPTS=2
 
+connectivity_status_allows_recovery 20 false
+connectivity_status_allows_recovery 0 true
+if connectivity_status_allows_recovery 0 false; then
+    printf 'Healthy VPN with priority checks disabled must not enter recovery\n' >&2
+    exit 1
+fi
+if connectivity_status_allows_recovery 30 true; then
+    printf 'Configuration errors must not enter recovery\n' >&2
+    exit 1
+fi
+
 printf 'Connectivity confirmation tests passed\n'

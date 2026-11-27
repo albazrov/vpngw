@@ -206,6 +206,15 @@ check_wan_connectivity() {
     return 1
 }
 
+connectivity_status_allows_recovery() {
+    local status="${1:-}"
+    local priority_check="${2:-false}"
+
+    [[ "$status" -eq 20 ]] || {
+        [[ "$status" -eq 0 && "$priority_check" == true ]]
+    }
+}
+
 
 # ПРОВЕРКА СКОРОСТИ КАНАЛА 
 

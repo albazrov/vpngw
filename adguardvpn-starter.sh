@@ -305,7 +305,9 @@ if [ -f "$AUTH_FLAG" ]; then
 fi
 
 # ПЕРВАЯ И ГЛАВНАЯ ПРОВЕРКА
-if check_internet; then
+check_internet
+HEALTH_STATUS=$?
+if [[ "$HEALTH_STATUS" -eq 0 ]]; then
     # Если мы здесь, значит интернет и VPN работают. 
     # Проверяем, не висит ли флаг ожидания авторизации
     if [ -f "$AUTH_FLAG" ]; then 
@@ -359,7 +361,7 @@ if [[ "$HEALTH_STATUS" -eq 10 ]]; then
     fi
 fi
 
-if [[ "$HEALTH_STATUS" -ne 10 && "$HEALTH_STATUS" -ne 20 ]]; then
+if ! connectivity_status_allows_recovery "$HEALTH_STATUS" "$CHECK_PRIORITY"; then
     printf 'Unexpected connectivity check status: %s\n' "$HEALTH_STATUS" >&2
     exit "$HEALTH_STATUS"
 fi
