@@ -13,6 +13,8 @@ Use this skill when reviewing a change to the VPN gateway, Telegram bot, recover
 - Manual bot switching and automatic starter recovery share the VPN switch lock.
 - A lock-busy result is distinct from permission, missing-state, timeout, and runtime errors.
 - VPN success requires CLI success, connectivity, and the requested GeoIP location.
+- WAN and VPN failures require repeated multi-target confirmation before recovery can switch the tunnel.
+- After WAN recovery, rerun the full health check before reconnecting so a healthy VPN is not switched unnecessarily.
 - `/dev/shm/vpn_stats` is a real `root:root 0700` directory; do not restore world-writable mode.
 - RAM-log writers and `vpn-log-sync.sh` share `vpn-log.lock`; hourly reports do not truncate the RAM log.
 - `adguardvpn-cli status` update notices are emitted only as a separate hourly Telegram message.
