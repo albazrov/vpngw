@@ -125,32 +125,85 @@ ensure_stats_dir() {
 }
 
 check_vpn_connectivity() {
-    # Функция принимает один аргумент — имя интерфейса
     local interface="$1"
-    
-    # Защита: если интерфейс не передан, сразу возвращаем ошибку
+    local attempts="${VPNGW_CONNECTIVITY_ATTEMPTS:-2}"
+    local delay="${VPNGW_CONNECTIVITY_DELAY:-2}"
+    local attempt target http_code
+
     if [ -z "$interface" ]; then
         echo "[ERROR] Интерфейс не указан в функции check_vpn_connectivity" >&2
         return 2
     fi
-
-    # Проверяем, существует ли вообще массив CHECK_TARGETS
-    if [ ${#CHECK_TARGETS[@]} -eq 0 ]; then
-        echo "[WARNING] Список CHECK_TARGETS пуст или не задан. Используем хост по умолчанию." >&2
-        local fallback_targets=("1.1.1.1" "8.8.8.8")
-        local targets=("${fallback_targets[@]}")
-    else
-        local targets=("${CHECK_TARGETS[@]}")
+    if [[ ! "$attempts" =~ ^[1-9][0-9]?$ || ! "$delay" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+        echo "[ERROR] Invalid connectivity retry settings" >&2
+        return 2
     fi
 
-    # Цикл проверки хостов
-    for target in "${targets[@]}"; do
-        if curl -s --interface "$interface" --connect-timeout 5 --max-time 10 "$target" >/dev/null; then
-            return 0 # Успех: хотя бы один хост ответил
+    local -a targets
+    if [ "${#CHECK_TARGETS[@]}" -eq 0 ]; then
+        echo "[WARNING] Список CHECK_TARGETS пуст или не задан. Используем хост по умолчанию." >&2
+        targets=("1.1.1.1" "8.8.8.8")
+    else
+        targets=("${CHECK_TARGETS[@]}")
+    fi
+
+    for ((attempt=1; attempt<=attempts; attempt++)); do
+        if ! ip link show dev "$interface" 2>/dev/null | grep -q '<[^>]*UP[^>]*>'; then
+            (( attempt < attempts )) && sleep "$delay"
+            continue
+        fi
+
+        for target in "${targets[@]}"; do
+            http_code=$(curl -sS --interface "$interface" \
+                --connect-timeout 3 --max-time 7 \
+                -o /dev/null -w '%{http_code}' "https://$target" 2>/dev/null || true)
+            if [[ "$http_code" =~ ^[1-5][0-9][0-9]$ ]]; then
+                return 0
+            fi
+        done
+        if (( attempt < attempts )); then
+            sleep "$delay"
         fi
     done
-    
-    return 1 # Ошибка: ни один хост из списка не доступен
+
+    return 1
+}
+
+check_wan_connectivity() {
+    local interface="${1:-${NET_IF:-}}"
+    local attempts="${VPNGW_CONNECTIVITY_ATTEMPTS:-2}"
+    local delay="${VPNGW_CONNECTIVITY_DELAY:-2}"
+    local attempt target http_code
+
+    if [[ -z "$interface" || ! "$attempts" =~ ^[1-9][0-9]?$ ||
+          ! "$delay" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+        return 2
+    fi
+
+    local -a targets
+    if [ "${#CHECK_TARGETS[@]}" -eq 0 ]; then
+        targets=("1.1.1.1" "8.8.8.8")
+    else
+        targets=("${CHECK_TARGETS[@]}")
+    fi
+
+    for ((attempt=1; attempt<=attempts; attempt++)); do
+        if ip link show dev "$interface" 2>/dev/null | grep -q '<[^>]*UP[^>]*>'; then
+            for target in "${targets[@]}"; do
+                if ping -c 1 -W 2 -I "$interface" "$target" >/dev/null 2>&1; then
+                    return 0
+                fi
+                http_code=$(curl -sS --interface "$interface" \
+                    --connect-timeout 3 --max-time 7 \
+                    -o /dev/null -w '%{http_code}' "https://$target" 2>/dev/null || true)
+                if [[ "$http_code" =~ ^[1-5][0-9][0-9]$ ]]; then
+                    return 0
+                fi
+            done
+        fi
+        (( attempt < attempts )) && sleep "$delay"
+    done
+    return 1
 }
 
 

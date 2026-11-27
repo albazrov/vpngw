@@ -82,6 +82,7 @@ jobs:
           bash tests/test_speed_test_http_status.sh
           bash tests/test_vpn_runtime_locks.sh
           bash tests/test_adguard_update_notice.sh
+          bash tests/test_connectivity_confirmation.sh
 
       - name: Run Python bot tests
         run: python -m pytest -q python_bot/tests

@@ -56,6 +56,8 @@ The runtime directory is volatile and is recreated at boot by systemd-tmpfiles. 
 
 The root hourly report calls `adguardvpn-cli status` with a bounded timeout. If the CLI announces a newer version, the bot receives a separate Telegram message immediately after the normal hourly report. Current-version and no-update responses do not generate a message.
 
+Automatic recovery requires confirmed failure before changing the tunnel. WAN and VPN probes retry across multiple configured targets; a missing or temporarily unusable interface must remain unavailable for the full confirmation window. If WAN recovers during the wait, the full health check runs again and no reconnect is attempted when VPN is already healthy.
+
 ## Verification
 
 Local checks before release:
